@@ -130,6 +130,8 @@ button:disabled{opacity:.5;cursor:default}
 .s1{background:var(--c1)}.s2{background:var(--c2)}.s3{background:var(--c3)}.s4{background:var(--c4)}
 .lg-look,.lg-turn{display:inline-block;width:14px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px;background:var(--muted)}
 .lg-look{opacity:.38}
+.sb-row i.stop{background:repeating-linear-gradient(135deg,var(--warn) 0 3px,transparent 3px 6px)}
+.lg-stop{display:inline-block;width:14px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px;background:repeating-linear-gradient(135deg,var(--warn) 0 3px,transparent 3px 6px)}
 .sb-row i.redo{cursor:pointer}
 .sb-row i.redo:hover,.sb-row i.redo:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
 button.mini{padding:2px 8px;font-size:12px}
@@ -1367,7 +1369,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = api; else 
       for (const fm0 of [0, 1, 2, 3].map(fmFor).concat(FMAP)) { const t = describe(moves, r, { anchorFrom: iFB, cuts, fm0, probe: iFB }); if (t.fmAt.join('') === want.join('')) { toks = t; break; } }
       if (!toks) toks = describe(moves, r, { anchorFrom: iFB, cuts, reset: { i: iFB, fm: want } });
     }
-    const part = (name, a, b, extra) => Object.assign({ name, from: a, to: b, t: tAt(b) - tAt(a), look: b > a ? Math.max(0, moves[a][1] - tAt(a)) : 0,
+    // stopped: pauses of half a second or more between turns inside the step (not the look before it)
+    const stopAt = (a, b) => { let st = 0, ns = 0; for (let i = a + 1; i < b; i++) { const g = moves[i][1] - moves[i - 1][1]; if (g >= (opts.stopMs || 500)) { st += g; ns++; } } return [st, ns]; };
+    const part = (name, a, b, extra) => Object.assign({ name, from: a, to: b, t: tAt(b) - tAt(a), look: b > a ? Math.max(0, moves[a][1] - tAt(a)) : 0, stop: stopAt(a, b)[0], stops: stopAt(a, b)[1],
       mv: stm(moves.slice(a, b).map(x => x[0])), text: toks.filter(t => t.i0 >= a && t.i0 < b).map(t => t.txt).join(' ') }, extra || {});
     const steps = [];
     if (iFB > 0 || iB > 0) { steps.push(part('FB', 0, iFB)); steps.push(part('SB', iFB, iB)); }
@@ -1389,38 +1393,110 @@ if (typeof module !== 'undefined' && module.exports) module.exports = api; else 
     return { steps, r, iFB, iB, iCO, iCM, iEO, iLR, solved: solvedEnd };
   }
 
-  // ----- first-block solver: exact distances for the five block pieces -----
+  // ----- first-block solver -----
+  // Moves 0-17 are face turns and 18-20 are M, M2 and M' (relative to the centres an M is R with
+  // L'). Each counts as one move, as in the slice turn metric. An r turn is an L turn relative to
+  // the centres, so it is already in the set; it only changes how a solution is written.
+  const NM = 21;
+  const MOVE_C = E.MOVE_CUBES.slice(0, 18);
+  for (let q = 1; q <= 3; q++) MOVE_C.push(E.applyMoves(E.solved(), [mv(1, q), mv(4, 4 - q)]));
+  const mFace = (m) => m >= 18 ? 6 : (m / 3) | 0;
+  const mAxis = (m) => m >= 18 ? 1 : ((m / 3) | 0) % 3;
+  // Skip sequences that repeat another: the same layer twice, opposite faces in both orders, and
+  // M next to R or L (any such pair is also two face turns).
+  function canFollow(m, last) {
+    if (last < 0) return true;
+    const f = mFace(m), g = mFace(last);
+    if (f === g) return false;
+    if (mAxis(m) !== mAxis(last)) return true;
+    if (f === 6 || g === 6) return false;
+    return f > g;
+  }
   let FBT = null;
+  const FB_E4 = [6, 9, 10, 4];   // DL, FL, BL and the DR edge
   function fbCode(s) {
     const e = FBE.map(p => { const i = s.ep.indexOf(p); return i * 2 + s.eo[i]; }), c = FBC.map(p => { const i = s.cp.indexOf(p); return i * 3 + s.co[i]; });
     return ((e[0] * 24 + e[1]) * 24 + e[2]) * 576 + c[0] * 24 + c[1];
   }
   function fbBuild() {
     if (FBT) return;
-    const em = new Int16Array(24 * 18), cm = new Int16Array(24 * 18);
-    for (let m = 0; m < 18; m++) {
-      const M = E.MOVE_CUBES[m];
-      for (let i = 0; i < 12; i++) { const j = M.ep[i]; for (let o = 0; o < 2; o++) em[(j * 2 + o) * 18 + m] = i * 2 + ((o + M.eo[i]) % 2); }
-      for (let i = 0; i < 8; i++) { const j = M.cp[i]; for (let o = 0; o < 3; o++) cm[(j * 3 + o) * 18 + m] = i * 3 + ((o + M.co[i]) % 3); }
+    const em = new Int16Array(24 * NM), cm = new Int16Array(24 * NM);
+    for (let m = 0; m < NM; m++) {
+      const M = MOVE_C[m];
+      for (let i = 0; i < 12; i++) { const j = M.ep[i]; for (let o = 0; o < 2; o++) em[(j * 2 + o) * NM + m] = i * 2 + ((o + M.eo[i]) % 2); }
+      for (let i = 0; i < 8; i++) { const j = M.cp[i]; for (let o = 0; o < 3; o++) cm[(j * 3 + o) * NM + m] = i * 3 + ((o + M.co[i]) % 3); }
     }
     const NE = 13824, NC = 576;
-    const eM = new Uint16Array(NE * 18), cM = new Uint16Array(NC * 18);
+    const eM = new Uint16Array(NE * NM), cM = new Uint16Array(NC * NM);
     for (let a = 0; a < 24; a++) for (let b = 0; b < 24; b++) {
-      for (let m = 0; m < 18; m++) cM[(a * 24 + b) * 18 + m] = cm[a * 18 + m] * 24 + cm[b * 18 + m];
-      for (let c = 0; c < 24; c++) { const code = (a * 24 + b) * 24 + c; for (let m = 0; m < 18; m++) eM[code * 18 + m] = (em[a * 18 + m] * 24 + em[b * 18 + m]) * 24 + em[c * 18 + m]; }
+      for (let m = 0; m < NM; m++) cM[(a * 24 + b) * NM + m] = cm[a * NM + m] * 24 + cm[b * NM + m];
+      for (let c = 0; c < 24; c++) { const code = (a * 24 + b) * 24 + c; for (let m = 0; m < NM; m++) eM[code * NM + m] = (em[a * NM + m] * 24 + em[b * NM + m]) * 24 + em[c * NM + m]; }
     }
     const dist = new Int8Array(NE * NC).fill(-1);
-    const q = new Int32Array(5322240 + 16); let head = 0, tail = 0;
+    const q = new Int32Array(NE * NC); let head = 0, tail = 0;
     for (let n = 0; n < 4; n++) { const c = fbCode(E.applyMoves(E.solved(), LN[n])); if (dist[c] < 0) { dist[c] = 0; q[tail++] = c; } }
     while (head < tail) {
-      const c = q[head++], e = (c / NC) | 0, k = c - e * NC, d = dist[c] + 1, eb = e * 18, kb = k * 18;
-      for (let m = 0; m < 18; m++) { const n2 = eM[eb + m] * NC + cM[kb + m]; if (dist[n2] < 0) { dist[n2] = d; q[tail++] = n2; } }
+      const c = q[head++], e = (c / NC) | 0, k = c - e * NC, d = dist[c] + 1, eb = e * NM, kb = k * NM;
+      for (let m = 0; m < NM; m++) { const n2 = eM[eb + m] * NC + cM[kb + m]; if (dist[n2] < 0) { dist[n2] = d; q[tail++] = n2; } }
     }
-    FBT = { eM, cM, dist };
+    // the four bottom-and-left edges with the DR edge: a lower bound for first block + DR
+    const ND = 331776, dd = new Int8Array(ND).fill(-1), q2 = new Int32Array(ND); head = tail = 0;
+    const dCode = (e) => ((e[0] * 24 + e[1]) * 24 + e[2]) * 24 + e[3];
+    for (let n = 0; n < 4; n++) {
+      const s = n ? E.applyMoves(E.solved(), [mv(1, n), mv(4, 4 - n)]) : E.solved();
+      const c = dCode(FB_E4.map(p => { const i = s.ep.indexOf(p); return i * 2 + s.eo[i]; })); if (dd[c] < 0) { dd[c] = 0; q2[tail++] = c; }
+    }
+    while (head < tail) {
+      const c = q2[head++], d = dd[c] + 1, x = [(c / 13824) | 0, ((c / 576) | 0) % 24, ((c / 24) | 0) % 24, c % 24];
+      for (let m = 0; m < NM; m++) { const n2 = dCode(x.map(v => em[v * NM + m])); if (dd[n2] < 0) { dd[n2] = d; q2[tail++] = n2; } }
+    }
+    FBT = { em, cm, eM, cM, dist, dd };
   }
   function fbDist(s) { fbBuild(); return FBT.dist[fbCode(s)]; }
-  // Shortest first blocks (face turns only). A solution may leave the block on a side wall of
-  // the left layer; it is then written with an x rotation in front so the block lands on the bottom.
+  function fbdrDone(s) { const n = fbN(s); if (n < 0) return false; const t = norm(s, n); return t.ep[4] === 4 && !t.eo[4]; }
+
+  // Write a solution (relative to the centres) the way you would turn it. Any L turn can be
+  // turned as r instead, and the solution may start with an x tilt so the block ends up on the
+  // bottom left. Each version is checked on a cube with centres; the easiest one to turn wins.
+  const PRE = ['', "x'", 'x2', 'x'];
+  const TOK_COST = { U: 0, R: 0, r: 0.3, M: 0.3, F: 0.8, L: 0.8, D: 1.2, B: 1.6 };
+  function homeOn(c, dr) {
+    for (const p of FBE) if (c.ep[p] !== p || c.eo[p]) return false;
+    for (const p of FBC) if (c.cp[p] !== p || c.co[p]) return false;
+    return !dr || (c.ep[4] === 4 && !c.eo[4]);
+  }
+  function writeOut(s, ms, dr) {
+    const ls = ms.reduce((a, m, i) => (m < 18 && ((m / 3) | 0) === 4 ? a.concat(i) : a), []);
+    let best = null;
+    for (let mask = 0; mask < (1 << ls.length); mask++) {
+      const asR = new Set(ls.filter((_, j) => mask >> j & 1));
+      for (let k = 0; k < 4; k++) {
+        let fm = [0, 1, 2, 3, 4, 5]; const turn = (map, n) => { n = ((n % 4) + 4) % 4; for (let i = 0; i < n; i++) fm = fm.map(f => map[f]); };
+        turn(XM, -k);
+        const toks = [];
+        ms.forEach((m, i) => {
+          if (m >= 18) { const a = m - 17; toks.push('M' + SUF[a]); turn(XM, -a); return; }
+          const f = (m / 3) | 0, q = m % 3 + 1;
+          if (asR.has(i)) { toks.push('r' + SUF[q]); turn(XM, q); }
+          else toks.push(FACES[fm[f]] + SUF[q]);
+        });
+        const text = (PRE[k] ? PRE[k] + ' ' : '') + toks.join(' ');
+        const cost = toks.reduce((a, t) => a + TOK_COST[t[0]] + (t[1] === '2' ? 0.2 : 0), k ? (k === 2 ? 1 : 0.8) : 0);
+        if (best && cost >= best.cost) continue;
+        const c = new CubeLib({ center: [0, 1, 2, 3, 4, 5], cp: s.cp.slice(), co: s.co.slice(), ep: s.ep.slice(), eo: s.eo.slice() });
+        if (text) c.move(text);
+        if (homeOn(c, dr)) best = { text, cost, moves: ms };
+      }
+    }
+    return best;
+  }
+  function finish(s, raw, dr, show) {
+    const out = [], seen = new Set();
+    for (const ms of raw) { const w = writeOut(s, ms, dr); if (w && !seen.has(w.text)) { seen.add(w.text); out.push(w); } }
+    out.sort((a, b) => a.cost - b.cost);
+    return out.slice(0, show || out.length);
+  }
+  // Shortest first blocks (M and r count as one move, like any face turn).
   function fbSolutions(s, cap, show) {
     fbBuild();
     const { eM, cM, dist } = FBT, raw = [], path = [];
@@ -1428,22 +1504,41 @@ if (typeof module !== 'undefined' && module.exports) module.exports = api; else 
       if (raw.length >= cap) return;
       const d = dist[c]; if (d === 0) { raw.push(path.slice()); return; }
       const e = (c / 576) | 0, k = c - e * 576;
-      for (let m = 0; m < 18; m++) {
-        const f = (m / 3) | 0; if (last >= 0 && (f === last || (f % 3 === last % 3 && f < last))) continue;
-        const n2 = eM[e * 18 + m] * 576 + cM[k * 18 + m]; if (dist[n2] !== d - 1) continue;
-        path.push(m); dfs(n2, f); path.pop();
+      for (let m = 0; m < NM; m++) {
+        if (!canFollow(m, last)) continue;
+        const n2 = eM[e * NM + m] * 576 + cM[k * NM + m]; if (dist[n2] !== d - 1) continue;
+        path.push(m); dfs(n2, m); path.pop();
       }
     };
     dfs(fbCode(s), -1);
-    const PRE = ['', "x'", 'x2', 'x'];
-    const out = raw.map(ms => {
-      const n = fbN(E.applyMoves(s, ms));
-      const ren = (f) => { for (let i = 0; i < (4 - n) % 4; i++) f = XM[f]; return f; };
-      const faces = ms.map(m => ren((m / 3) | 0));
-      const cost = faces.reduce((a, f, i) => a + (f === 5 ? 3 : f === 3 ? 1.2 : f === 2 ? 0.6 : 0) + (ms[i] % 3 === 1 ? 0.2 : 0), n ? 0.8 : 0);
-      return { n, moves: ms, text: (PRE[n] ? PRE[n] + ' ' : '') + ms.map((m, i) => FACES[faces[i]] + ['', '2', "'"][m % 3]).join(' '), cost };
-    }).sort((a, b) => a.cost - b.cost);
-    return out.slice(0, show || out.length);
+    return finish(s, raw, false, show);
+  }
+  // First block plus the DR edge: iterative deepening, bounded by both tables.
+  function fbdrSearch(s, cap, timeMs) {
+    fbBuild();
+    const { em, cm, dist, dd } = FBT, t0 = Date.now();
+    const e0 = FB_E4.map(p => { const i = s.ep.indexOf(p); return i * 2 + s.eo[i]; }), c0 = FBC.map(p => { const i = s.cp.indexOf(p); return i * 3 + s.co[i]; });
+    const h = (e, c) => Math.max(dist[((e[0] * 24 + e[1]) * 24 + e[2]) * 576 + c[0] * 24 + c[1]], dd[((e[0] * 24 + e[1]) * 24 + e[2]) * 24 + e[3]]);
+    const raw = [], path = []; let depth, timedOut = false, nodes = 0;
+    const dfs = (e, c, g, last) => {
+      const hv = h(e, c);
+      if (g + hv > depth) return;
+      if (hv === 0) { if (g === depth) raw.push(path.slice()); return; }
+      if (raw.length >= cap || timedOut) return;
+      if ((++nodes & 4095) === 0 && Date.now() - t0 > timeMs) { timedOut = true; return; }
+      for (let m = 0; m < NM; m++) {
+        if (!canFollow(m, last)) continue;
+        path.push(m); dfs(e.map(v => em[v * NM + m]), c.map(v => cm[v * NM + m]), g + 1, m); path.pop();
+        if (raw.length >= cap || timedOut) return;
+      }
+    };
+    for (depth = h(e0, c0); depth <= 20 && !raw.length && !timedOut; depth++) dfs(e0, c0, 0, -1);
+    return raw.length ? { opt: raw[0].length, raw } : null;
+  }
+  function fbdrDist(s, timeMs) { const r = fbdrSearch(s, 1, timeMs || 3000); return r ? r.opt : null; }
+  function fbdrSolutions(s, cap, show) {
+    const r = fbdrSearch(s, cap, 4000); if (!r) return null;
+    return { opt: r.opt, sols: finish(s, r.raw, true, show) };
   }
 
   // ----- states for the drills (all in the block frame) -----
@@ -1485,8 +1580,12 @@ if (typeof module !== 'undefined' && module.exports) module.exports = api; else 
     }
   }
 
+  // First block with one square already built (at the back: DL, BL and the DBL corner; at the
+  // front: DL, FL and DLF). Everything else is random.
+  function lpCase(back, rng) { return back ? randomState([6], [6, 10], rng) : randomState([5], [6, 9], rng); }
+
   const api = { ROTS, FMAP, conj, unconj, rotFor, rotFaces, fbN, sbN, pairN, norm, cornersAUF, stageDone, ocName, permName, OC_ALGS, PERM_ALGS, caseState,
-    stm, describe, fmFor, split, fbBuild, fbReady: () => !!FBT, fbDist, fbSolutions, randomState, lseScramble, lseCase, cmllCase, frameFor };
+    stm, describe, fmFor, split, fbBuild, fbReady: () => !!FBT, fbDist, fbSolutions, fbdrDone, fbdrDist, fbdrSolutions, lpCase, randomState, lseScramble, lseCase, cmllCase, frameFor };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.ROUX = api;
 })(typeof self !== 'undefined' ? self : this);
 </script>
@@ -4773,7 +4872,7 @@ function rxFinish(){
     rec.time = Math.round(times[times.length - 1]); rec.start = rx.start; rec.moves = mv.map((x, i) => [x.m, Math.round(times[i])]);
     try {
       const sp = ROUX.split(rec.start, rec.moves);
-      rec.split = sp.steps.map(s => ({ n: s.name, t: Math.round(s.t), look: Math.round(s.look), mv: s.mv, c: s.case || undefined }));
+      rec.split = sp.steps.map(s => ({ n: s.name, t: Math.round(s.t), look: Math.round(s.look), st: Math.round(s.stop), mv: s.mv, c: s.case || undefined }));
       rec.stm = ROUX.stm(rec.moves.map(x => x[0]));
       if (sp.steps.length && ROUX.fbReady()) rec.fbOpt = ROUX.fbDist(ROUX.conj(rec.start, sp.r));
     } catch (e) {}
@@ -4799,10 +4898,11 @@ function rxStepsHtml(steps){
     const cls = RX_CLS[x.name] || 's1';
     return '<div class="sb-step" style="flex:' + Math.max(x.t, total * 0.04) + '"><span class="sb-t">' + fmtT(x.t) + '</span><div class="sb-row">' +
       (x.look > 0 ? '<i class="' + cls + ' look" style="flex:' + x.look + '" title="' + x.name + ': look ' + fmtT(x.look) + '"></i>' : '') +
-      '<i class="' + cls + '" style="flex:' + Math.max(x.t - x.look, 1) + '" title="' + x.name + ': turn ' + fmtT(x.t - x.look) + '"></i></div><span class="sb-n">' + x.name + '</span></div>';
-  }).join('') + '</div><div class="bar-legend" style="margin:4px 0 10px"><span><i class="lg-look"></i>lighter: looking</span><span><i class="lg-turn"></i>solid: turning</span></div>';
-  const row = (x, sub) => '<tr' + (sub ? ' class="hint"' : '') + '><td style="font-family:var(--sans)' + (sub ? ';padding-left:18px' : '') + '">' + esc(sub ? x.name : (RX_LONG[x.name] || x.name)) + '</td><td>' + fmtT(x.t) + '</td><td>' + fmtT(x.look) + '</td><td>' + fmtT(x.t - x.look) + '</td><td>' + x.mv + '</td><td style="font-family:var(--sans);white-space:normal">' + esc(x.case || '') + '</td></tr>';
-  h += '<div class="tablewrap"><table><thead><tr><th>Step</th><th>Time</th><th>Look</th><th>Turn</th><th>Moves</th><th>Case</th></tr></thead><tbody>' +
+      (x.stop > 0 ? '<i class="stop" style="flex:' + x.stop + '" title="' + x.name + ': stopped ' + fmtT(x.stop) + '"></i>' : '') +
+      '<i class="' + cls + '" style="flex:' + Math.max(x.t - x.look - (x.stop || 0), 1) + '" title="' + x.name + ': turn ' + fmtT(x.t - x.look - (x.stop || 0)) + '"></i></div><span class="sb-n">' + x.name + '</span></div>';
+  }).join('') + '</div><div class="bar-legend" style="margin:4px 0 10px"><span><i class="lg-look"></i>lighter: looking</span><span><i class="lg-stop"></i>stopped mid-step (0.5 s or more)</span><span><i class="lg-turn"></i>solid: turning</span></div>';
+  const row = (x, sub) => '<tr' + (sub ? ' class="hint"' : '') + '><td style="font-family:var(--sans)' + (sub ? ';padding-left:18px' : '') + '">' + esc(sub ? x.name : (RX_LONG[x.name] || x.name)) + '</td><td>' + fmtT(x.t) + '</td><td>' + fmtT(x.look) + '</td><td>' + (x.stop ? fmtT(x.stop) + (x.stops > 1 ? ' <span class="hint">(' + x.stops + ')</span>' : '') : '—') + '</td><td>' + fmtT(x.t - x.look - (x.stop || 0)) + '</td><td>' + x.mv + '</td><td style="font-family:var(--sans);white-space:normal">' + esc(x.case || '') + '</td></tr>';
+  h += '<div class="tablewrap"><table><thead><tr><th>Step</th><th>Time</th><th>Look</th><th>Stopped</th><th>Turn</th><th>Moves</th><th>Case</th></tr></thead><tbody>' +
     steps.map(x => row(x) + (x.sub || []).map(y => row(y, true)).join('')).join('') + '</tbody></table></div>';
   h += '<p class="eyebrow" style="margin-top:12px">Your moves</p><div class="algs">' + steps.map(x => '<span class="lbl">' + x.name + '</span><code>' + esc(x.text || '—') + '</code><span class="n">' + x.mv + '</span>').join('') + '</div>';
   return h;
@@ -4820,10 +4920,15 @@ function rxDetailHtml(){
   const fb = a.steps.find(x => x.name === 'FB');
   const opt = ROUX.fbReady() ? ROUX.fbDist(ROUX.conj(s.start, a.r)) : s.fbOpt;
   h += '<p class="hint">Blocks: ' + swc(col.bottom) + col.bottom + ' on the bottom, ' + swc(col.left) + col.left + ' block first.' +
-    (fb && opt != null && fb.mv ? ' Your first block took <b>' + fb.mv + '</b> moves; the shortest for that block is <b>' + opt + '</b> face turns.' : '') +
+    (fb && opt != null && fb.mv ? ' Your first block took <b>' + fb.mv + '</b> moves; the shortest for that block is <b>' + opt + '</b> (M and r count as one).' : '') +
     ' Moves are written as you hold the cube. The cube cannot sense rotations, so once the first block is done a left-layer turn is read as r, and R with L\' together as M.</p>';
+  if (fb && ROUX.fbReady()) {
+    if (!rxFbSols || rxFbSols.id !== s.id) { let sols = []; try { sols = ROUX.fbSolutions(ROUX.conj(s.start, a.r), 300, 3); } catch (e) {} rxFbSols = { id: s.id, sols }; }
+    if (rxFbSols.sols.length) h += '<p class="hint" style="margin:8px 0 2px">Shortest first blocks for this scramble, starting with ' + swc(col.bottom) + col.bottom + ' on the bottom and ' + swc(col.front) + col.front + ' in front</p>' + solsHtml(rxFbSols.sols) + '<p class="hint">' + SOLS_NOTE + '</p>';
+  }
   return h;
 }
+let rxFbSols = null;
 function renderRx(){
   const box = $('rxBox'); if (!box) return;
   let h = '';
@@ -4847,12 +4952,16 @@ function renderRxStats(){
   let h = '<p class="eyebrow">Your Roux solves</p><div class="kpis">' + kpi(rxSolves.length, 'solves') + kpi(fmtT(fin.length ? Math.min(...fin) : null), 'best') + kpi(fmtT(aoN(rxSolves, 5)), 'ao5') + kpi(fmtT(aoN(rxSolves, 12)), 'ao12') + kpi(fin.length ? fmtT(fin.reduce((a, b) => a + b, 0) / fin.length) : '—', 'mean') + '</div>';
   const withSp = rxSolves.filter(s => s.split && s.split.length === 4).slice(0, 50);
   if (withSp.length) {
+    // solves saved before stopped time was recorded: work it out once from their turns
+    let filled = false;
+    for (const x of withSp) if (x.split[0].st == null && x.start && x.moves) { try { const sp = ROUX.split(x.start, x.moves); if (sp.steps.length === 4) { sp.steps.forEach((y, i) => { if (x.split[i] && x.split[i].n === y.name) x.split[i].st = Math.round(y.stop); }); filled = true; } } catch (e) {} }
+    if (filled) rxSave();
     const med = (a) => { const b = a.slice().sort((p, q) => p - q); return b[b.length >> 1]; };
     const tot = med(withSp.map(s => s.time)) || 1;
-    const rows = ['FB', 'SB', 'CMLL', 'LSE'].map(k => { const xs = withSp.map(s => s.split.find(x => x.n === k)); return { k, t: med(xs.map(x => x.t)), look: med(xs.map(x => x.look)), mv: med(xs.map(x => x.mv)) }; });
+    const rows = ['FB', 'SB', 'CMLL', 'LSE'].map(k => { const xs = withSp.map(s => s.split.find(x => x.n === k)); const ys = xs.filter(x => x.st != null); return { k, t: med(xs.map(x => x.t)), look: med(xs.map(x => x.look)), st: ys.length ? med(ys.map(x => x.st)) : null, mv: med(xs.map(x => x.mv)) }; });
     const worst = rows.slice().sort((a, b) => b.t - a.t)[0];
-    h += '<p class="eyebrow" style="margin:8px 0 4px">Where the time goes (medians, last ' + withSp.length + ')</p><div class="tablewrap"><table><thead><tr><th>Step</th><th>Time</th><th>Share</th><th>Look</th><th>Moves</th></tr></thead><tbody>' +
-      rows.map(x => '<tr><td style="font-family:var(--sans)">' + RX_LONG[x.k] + '</td><td>' + fmtT(x.t) + '</td><td>' + Math.round(100 * x.t / tot) + '%</td><td>' + fmtT(x.look) + '</td><td>' + x.mv + '</td></tr>').join('') + '</tbody></table></div>' +
+    h += '<p class="eyebrow" style="margin:8px 0 4px">Where the time goes (medians, last ' + withSp.length + ')</p><div class="tablewrap"><table><thead><tr><th>Step</th><th>Time</th><th>Share</th><th>Look</th><th>Stopped</th><th>Moves</th></tr></thead><tbody>' +
+      rows.map(x => '<tr><td style="font-family:var(--sans)">' + RX_LONG[x.k] + '</td><td>' + fmtT(x.t) + '</td><td>' + Math.round(100 * x.t / tot) + '%</td><td>' + fmtT(x.look) + '</td><td>' + (x.st != null ? fmtT(x.st) : '') + '</td><td>' + x.mv + '</td></tr>').join('') + '</tbody></table></div>' +
       '<p class="hint">Most of your time goes into ' + RX_LONG[worst.k].toLowerCase() + '. Drills has one for each step.</p>';
     const opts = withSp.filter(s => s.fbOpt != null);
     if (opts.length >= 3) h += '<p class="hint">First block: ' + med(opts.map(s => s.split[0].mv)) + ' moves against a shortest of ' + med(opts.map(s => s.fbOpt)) + ' (medians).</p>';
@@ -4866,16 +4975,26 @@ function renderRxStats(){
 
 // --- drills: one step at a time ---
 const RD_KINDS = [['fb', 'First block'], ['sb', 'Second block'], ['cmll', 'Corners (CMLL)'], ['lse', 'Last six edges']];
+function fbVar(){ return settings.fbVar || 'full'; }
+const FB_VARS = [['full', 'Whole block'], ['lp', 'Last pair'], ['lpdr', 'Last pair + DR']];
 function rdRot(){ return settings.rouxRot == null ? 0 : settings.rouxRot; }
 function rdNew(){
   if (!solverReady) return;
   const go = () => {
     const r = rdRot(); let G;
-    if (rd.kind === 'fb') { do { G = ROUX.randomState([], []); } while (ROUX.fbDist(G) < 4); }
+    if (rd.kind === 'fb' && fbVar() !== 'full') {
+      const sq = settings.fbSq || 'back', dr = fbVar() === 'lpdr';
+      for (let i = 0; i < 200; i++) {
+        G = ROUX.lpCase(sq === 'either' ? Math.random() < 0.5 : sq === 'back');
+        const d = dr ? ROUX.fbdrDist(G, 500) : ROUX.fbDist(G);
+        if (d != null && d >= (dr ? 4 : 3)) break;
+      }
+    }
+    else if (rd.kind === 'fb') { do { G = ROUX.randomState([], []); } while (ROUX.fbDist(G) < 4); }
     else if (rd.kind === 'sb') { do { G = ROUX.randomState([5, 6], [6, 9, 10]); } while (ROUX.pairN(G) >= 0); }
     else if (rd.kind === 'cmll') G = ROUX.cmllCase();
     else G = ROUX.lseCase();
-    rd.target = ROUX.unconj(G, r); rd.attempt = 1;
+    rd.target = ROUX.unconj(G, r); rd.attempt = 1; rd.v = rd.kind === 'fb' ? fbVar() : undefined;
     rdArm();
   };
   if (rd.kind === 'fb') withFB($('rdBox'), go); else go();
@@ -4906,7 +5025,7 @@ function rdTurn(m, f, b, raw){
   if (rd.phase === 'ready') { rd.phase = 'running'; rd.t1 = raw && raw.localTimestamp != null ? raw.localTimestamp : performance.now(); renderRd(); rdLoop(); }
   if (rd.phase !== 'running') return;
   rd.moves.push({ m, raw });
-  const done = rd.kind === 'lse' ? E.equal(cur, E.solved()) : ROUX.stageDone(rd.kind, ROUX.conj(cur, rdRot()));
+  const done = rd.kind === 'lse' ? E.equal(cur, E.solved()) : rd.kind === 'fb' && rd.v === 'lpdr' ? ROUX.fbdrDone(ROUX.conj(cur, rdRot())) : ROUX.stageDone(rd.kind, ROUX.conj(cur, rdRot()));
   if (done) rdFinish();
 }
 function rdFinish(){
@@ -4918,11 +5037,12 @@ function rdFinish(){
   const moves = mv.map((x, i) => [x.m, Math.round(times[i]) + off]);
   const ms = moves.map(x => x[0]);
   let pauses = 0; for (let i = 1; i < moves.length; i++) if (moves[i][1] - moves[i - 1][1] > STOP_MS) pauses++;
-  const L = { kind: rd.kind, target: E.clone(rd.target), t: Math.round(times[times.length - 1]), look, stm: ROUX.stm(ms), pauses, att: rd.attempt };
+  const L = { kind: rd.kind, v: rd.v, target: E.clone(rd.target), t: Math.round(times[times.length - 1]), look, stm: ROUX.stm(ms), pauses, att: rd.attempt };
   const frame = ROUX.conj(rd.start, r);
   try {
     if (rd.kind === 'fb') {
-      L.opt = ROUX.fbDist(frame); L.sols = ROUX.fbSolutions(frame, 300, 4);
+      if (rd.v === 'lpdr') { const x = ROUX.fbdrSolutions(frame, 200, 4); if (x) { L.opt = x.opt; L.sols = x.sols; } }
+      else { L.opt = ROUX.fbDist(frame); L.sols = ROUX.fbSolutions(frame, 300, 4); }
       L.text = ROUX.describe(moves, r, {}).map(t => t.txt).join(' ');
     } else if (rd.kind === 'sb') {
       L.text = ROUX.describe(moves, r, { anchorFrom: 0, fm0: ROUX.fmFor(ROUX.fbN(frame)) }).map(t => t.txt).join(' ');
@@ -4933,11 +5053,13 @@ function rdFinish(){
     }
   } catch (e) {}
   rd.last = L;
-  rdLog.push({ k: rd.kind, d: Date.now(), t: L.t, look, stm: L.stm, opt: L.opt, pauses, c: L.case, first: rd.attempt === 1 }); rdSave();
+  rdLog.push({ k: rd.kind, v: rd.v, d: Date.now(), t: L.t, look, stm: L.stm, opt: L.opt, pauses, c: L.case, first: rd.attempt === 1 }); rdSave();
   renderRdStats();
   rdNew();
 }
-function rdAgain(){ if (!rd.last) return; rd.kind = rd.last.kind; rd.target = E.clone(rd.last.target); rd.attempt = (rd.last.att || 1) + 1; rdArm(); }
+function rdAgain(){ if (!rd.last) return; rd.kind = rd.last.kind; rd.v = rd.last.v; rd.target = E.clone(rd.last.target); rd.attempt = (rd.last.att || 1) + 1; rdArm(); }
+const SOLS_NOTE = 'M and r count as one move each, like a face turn. Easiest to turn first: R, U, r and M before F, L, D and B. An x in front means tip the cube that way first; the block still ends up on the bottom left (the centres in the middle slice get fixed later).';
+function solsHtml(sols){ return sols.map(s => '<div class="scr small">' + s.text.split(' ').map(t => '<span class="tok' + (/^x/.test(t) ? ' rot' : '') + '">' + esc(t) + '</span>').join('') + '</div>').join(''); }
 function rdResultHtml(){
   const L = rd.last; if (!L || L.kind !== rd.kind) return '';
   const stat1 = (v, k) => '<div class="stat"><div class="v">' + v + '</div><div class="k">' + k + '</div></div>';
@@ -4950,9 +5072,8 @@ function rdResultHtml(){
   if (L.text) h += '<p class="hint" style="margin:8px 0 2px">Your moves</p><div class="scr small">' + L.text.split(' ').map(t => '<span class="tok">' + esc(t) + '</span>').join('') + '</div>';
   if (L.sols && L.sols.length) {
     const c = rotColors(rdRot());
-    h += '<p class="hint" style="margin:8px 0 2px">Shortest first blocks (' + L.opt + ' face turns), starting with ' + c.bottom + ' on the bottom and ' + c.front + ' in front</p>' +
-      L.sols.map(s => '<div class="scr small">' + s.text.split(' ').map(t => '<span class="tok' + (/^x/.test(t) ? ' rot' : '') + '">' + esc(t) + '</span>').join('') + '</div>').join('') +
-      '<p class="hint">An x in front means: tip the cube that way first, and the block still ends up on the bottom left (the centres in the middle slice get fixed later). These use face turns only; with M and r moves you can sometimes match or beat them.</p>';
+    h += '<p class="hint" style="margin:8px 0 2px">Shortest ' + (L.v === 'lpdr' ? 'ways to finish the block and the DR edge' : L.v === 'lp' ? 'ways to finish the block' : 'first blocks') + ' (' + L.opt + ' moves), starting with ' + c.bottom + ' on the bottom and ' + c.front + ' in front</p>' +
+      solsHtml(L.sols) + '<p class="hint">' + SOLS_NOTE + '</p>';
   }
   return h + '<div class="row" style="margin-top:8px"><button class="mini" data-rdagain="1">Try this one again</button></div></div>';
 }
@@ -4965,21 +5086,29 @@ function rdRefHtml(){
 }
 const RD_HINT = {
   fb: 'Plan the whole block before you turn: where its five pieces are and in what order they go in. Then build it on the bottom left without stopping.',
+  lp: 'The first square is already built on the bottom left. Plan the last pair (a corner and its edge) and put it in without stopping.',
+  lpdr: 'The first square is built. Finish the block with the last pair and also put the DR edge (bottom right) in place: the start of the second block.',
   sb: 'The first block is done. Build the second one on the right using only R, r, M and U turns, so the first block never moves.',
   cmll: 'Both blocks are done. Solve the four top corners; the edges do not matter yet.',
   lse: 'Blocks and corners are done. Finish with M and U turns only: orient the six edges, place the left and right ones, then the last four.',
 };
+function rdHint(){ return rd.kind === 'fb' && fbVar() !== 'full' ? RD_HINT[fbVar()] : RD_HINT[rd.kind]; }
 function renderRd(){
   const box = $('rdBox'); if (!box) return;
   const r = rdRot();
   let h = '<div class="row"><label class="hint" for="rdBlock">My first block</label><select id="rdBlock">' + ROUX.ROTS.map((_, i) => { const c = rotColors(i); return [i, c.bottom + ' bottom, ' + c.left + ' on the left']; }).sort((a, b) => a[1] < b[1] ? -1 : 1).map(([i, t]) => '<option value="' + i + '"' + (i === r ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></div>';
-  if (rd.phase === 'nocube') h += '<p class="phase-title" style="margin-top:12px">Connect your cube to drill</p><p class="hint">' + RD_HINT[rd.kind] + '</p>';
+  if (rd.kind === 'fb') {
+    const v = fbVar(), sq = settings.fbSq || 'back';
+    h += '<div class="row" style="margin-top:8px"><div class="seg" role="group" aria-label="What to build">' + FB_VARS.map(([k, n]) => '<button data-fbvar="' + k + '" aria-pressed="' + (k === v) + '">' + n + '</button>').join('') + '</div>' +
+      (v !== 'full' ? '<label class="hint" for="rdSq">Square built</label><select id="rdSq">' + [['back', 'At the back'], ['front', 'At the front'], ['either', 'Either']].map(([k, n]) => '<option value="' + k + '"' + (k === sq ? ' selected' : '') + '>' + n + '</option>').join('') + '</select>' : '') + '</div>';
+  }
+  if (rd.phase === 'nocube') h += '<p class="phase-title" style="margin-top:12px">Connect your cube to drill</p><p class="hint">' + rdHint() + '</p>';
   else if (rd.phase === 'scrambling') {
     const toks = rd.rem.map((x, i) => '<span class="tok' + (i === 0 ? ' next' : '') + (x.fix ? ' fix' : '') + (x.partial && i === 0 ? ' part' : '') + '">' + wcaTok(x) + '</span>').join('');
-    h += '<p class="eyebrow" style="margin-top:12px">Scramble' + (rd.attempt > 1 ? ' · same one again' : '') + ' · ' + rd.rem.length + ' to go</p><div class="scr">' + toks + '</div><p class="hint">White on top, green in front for the scramble. ' + RD_HINT[rd.kind] + '</p>';
+    h += '<p class="eyebrow" style="margin-top:12px">Scramble' + (rd.attempt > 1 ? ' · same one again' : '') + ' · ' + rd.rem.length + ' to go</p><div class="scr">' + toks + '</div><p class="hint">White on top, green in front for the scramble. ' + rdHint() + '</p>';
   } else if (rd.phase === 'ready' || rd.phase === 'running') {
     const c = rotColors(r);
-    h += '<p class="eyebrow" style="margin-top:12px">' + (rd.kind === 'fb' ? (rd.phase === 'ready' ? 'Plan it, then turn' : 'Build the block') : 'Go') + '</p><div class="timer' + (rd.phase === 'ready' && rd.kind === 'fb' ? ' ready' : '') + '" id="rdTime">0</div>' +
+    h += '<p class="eyebrow" style="margin-top:12px">' + (rd.kind === 'fb' ? (rd.phase === 'ready' ? 'Plan it, then turn' : rd.v === 'lpdr' ? 'Finish the block and DR' : rd.v === 'lp' ? 'Finish the block' : 'Build the block') : 'Go') + '</p><div class="timer' + (rd.phase === 'ready' && rd.kind === 'fb' ? ' ready' : '') + '" id="rdTime">0</div>' +
       '<p class="hint">Hold ' + swc(c.bottom) + c.bottom + ' on the bottom and ' + swc(c.left) + c.left + ' on the left. ' + (rd.kind === 'fb' ? 'The number counts your planning time; the timer starts on your first turn.' : 'The clock is already running, so recognition counts.') + '</p>';
   }
   h += '<div class="row" style="margin-top:8px"><button class="mini" data-rdnew="1">New scramble</button></div>' + rdResultHtml() + rdRefHtml();
@@ -4989,8 +5118,10 @@ function renderRdStats(){
   const el = $('rdStats'); if (!el) return;
   const av = (a) => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
   let h = '<p class="eyebrow">Your drills · first tries, last 30 of each</p><div class="tablewrap"><table><thead><tr><th>Step</th><th>Runs</th><th>Time</th><th>Look</th><th>Moves</th><th>Pauses</th></tr></thead><tbody>';
-  for (const [k, n] of RD_KINDS) {
-    const xs = rdLog.filter(x => x.k === k && x.first !== false).slice(-30);
+  const kinds = [['fb', 'full', 'First block'], ['fb', 'lp', 'FB last pair'], ['fb', 'lpdr', 'FB last pair + DR']].concat(RD_KINDS.slice(1).map(([k, n]) => [k, null, n]));
+  for (const [k, v, n] of kinds) {
+    const xs = rdLog.filter(x => x.k === k && x.first !== false && (!v || (x.v || 'full') === v)).slice(-30);
+    if (v && v !== 'full' && !xs.length) continue;
     h += '<tr><td style="font-family:var(--sans)">' + n + '</td><td>' + xs.length + '</td>' + (xs.length ? '<td>' + fmt(av(xs.map(x => x.t))) + '</td><td>' + fmt(av(xs.map(x => x.look))) + '</td><td>' + av(xs.map(x => x.stm)).toFixed(1) + (k === 'fb' ? ' <span class="hint">(+' + av(xs.filter(x => x.opt != null).map(x => x.stm - x.opt)).toFixed(1) + ' over shortest)</span>' : '') + '</td><td>' + av(xs.map(x => x.pauses)).toFixed(1) + '</td>' : '<td colspan="4"></td>') + '</tr>';
   }
   h += '</tbody></table></div>';
@@ -5015,11 +5146,12 @@ $('tabRoux').addEventListener('click', (e) => {
   const r = e.target.closest('tr[data-rxid]'); if (r) { rx.viewId = Number(r.dataset.rxid); renderRx(); renderRxStats(); }
 });
 $('tabRxd').addEventListener('click', (e) => {
+  const fv = e.target.closest('[data-fbvar]'); if (fv) { settings.fbVar = fv.dataset.fbvar; store.set('settings', settings); rd.last = null; rdNew(); return; }
   const k = e.target.closest('[data-rdkind]'); if (k) { rd.kind = k.dataset.rdkind; settings.rdKind = rd.kind; store.set('settings', settings); rdNew(); return; }
   if (e.target.closest('[data-rdnew]')) { rdNew(); return; }
   if (e.target.closest('[data-rdagain]')) { rdAgain(); return; }
 });
-$('tabRxd').addEventListener('change', (e) => { if (e.target.id === 'rdBlock') { settings.rouxRot = +e.target.value; store.set('settings', settings); rd.last = null; rdNew(); } });
+$('tabRxd').addEventListener('change', (e) => { if (e.target.id === 'rdSq') { settings.fbSq = e.target.value; store.set('settings', settings); rdNew(); return; } if (e.target.id === 'rdBlock') { settings.rouxRot = +e.target.value; store.set('settings', settings); rd.last = null; rdNew(); } });
 $('tabTricks').addEventListener('click', (e) => {
   const tg = e.target.closest('[data-trig]'); if (tg) { dr.alg = tg.dataset.trig; drillArm(); return; }
   if (e.target.closest('#trUse')) { const v = ($('trCustom').value || '').trim(); const p = E.parseAlg(v); if (!p || !p.moves.length) { toast('That is not an alg Slotwise can read.'); return; } if (p.perToken.some(n => n === 0)) { toast('Rotations can\'t be tracked in a drill; leave them out.'); return; } dr.alg = p.tokens.join(' '); drillArm(); return; }
