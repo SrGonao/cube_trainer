@@ -78,6 +78,7 @@ button:disabled{opacity:.5;cursor:default}
 .tabs{display:flex;flex-wrap:wrap;gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:3px}
 .tabs button,.seg button{border:0;background:transparent;border-radius:7px;padding:6px 12px}
 .tabs button[aria-selected="true"],.seg button[aria-pressed="true"]{background:var(--accent);color:var(--panel);font-weight:600}
+.subnav{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:-4px 0 12px}
 .seg{display:inline-flex;gap:2px;border:1px solid var(--line);border-radius:9px;padding:2px;background:var(--ground)}
 .llcard{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
 .llcard svg{flex:none}
@@ -246,15 +247,16 @@ tbody tr:hover,tbody tr.sel{background:var(--accent-soft)}
   <header>
     <div class="brand"><h1>Slotwise</h1><span>CFOP and Roux trainer for GAN smart cubes</span></div>
     <div class="seg" role="group" aria-label="Method"><button data-method="cfop">CFOP</button><button data-method="roux">Roux</button></div>
-    <nav class="tabs" role="tablist" aria-label="Trainer"><button role="tab" data-tab="plan" aria-selected="false">Practice</button><button role="tab" data-tab="f2l" aria-selected="true">F2L</button><button role="tab" data-tab="ll" aria-selected="false">OLL &amp; PLL</button><button role="tab" data-tab="f2lc" aria-selected="false">F2L cards</button><button role="tab" data-tab="cross" aria-selected="false">Cross</button><button role="tab" data-tab="timer" aria-selected="false">Timer</button><button role="tab" data-tab="roux" aria-selected="false" hidden>Roux timer</button><button role="tab" data-tab="rxd" aria-selected="false" hidden>Roux drills</button><button role="tab" data-tab="tricks" aria-selected="false">Finger tricks</button></nav>
+    <nav class="tabs" role="tablist" aria-label="Trainer"><button role="tab" data-tab="timer" aria-selected="true">Timer</button><button role="tab" data-tab="roux" aria-selected="false" hidden>Timer</button><button role="tab" data-tab="drills" aria-selected="false">Drills</button><button role="tab" data-tab="plan" aria-selected="false">Practice</button></nav>
     <div class="conn">
       <span class="status"><span class="dot" id="dot"></span><span id="connText">No cube connected</span></span>
       <span class="status" id="bootStatus"><span id="bootText">Starting…</span><span class="progress"><i id="bootBar"></i></span></span>
       <button class="primary" id="btnConnect">Connect cube</button>
     </div>
   </header>
+  <nav class="subnav" id="drillNav" aria-label="Drill" hidden></nav>
 
-  <div id="tabF2L" class="stage" style="gap:16px">
+  <div id="tabF2L" class="stage" style="gap:16px" hidden>
   <div class="grid">
     <section class="panel stage" aria-live="polite">
       <div id="phaseBox"></div>
@@ -356,7 +358,7 @@ tbody tr:hover,tbody tr.sel{background:var(--accent-soft)}
       <section class="panel" id="planDays"></section>
     </div>
   </div>
-  <div class="grid" id="tabTimer" hidden>
+  <div class="grid" id="tabTimer">
     <section class="panel stage" aria-live="polite">
       <div id="tBox"></div>
       <details>
@@ -404,9 +406,7 @@ tbody tr:hover,tbody tr.sel{background:var(--accent-soft)}
     <section class="panel">
       <div class="row" style="justify-content:space-between;margin-bottom:10px">
         <p class="eyebrow" style="margin:0">Your cards</p>
-        <div class="seg" role="group" aria-label="Which set">
-          <button data-llset="both">OLL + PLL</button><button data-llset="OLL">OLL</button><button data-llset="PLL">PLL</button>
-        </div>
+
       </div>
       <div class="kpis" id="llKpis"></div>
       <div class="row" id="deckSortRow" hidden style="margin-bottom:10px"><label for="deckSort">Sort cases by</label><select id="deckSort"><option value="worst">Most extra moves in my solves</option><option value="slow">Slowest in my solves</option><option value="seen">Most seen in my solves</option><option value="list">J Perm's order</option></select></div>
@@ -2349,8 +2349,8 @@ function cardCase(c){
 let llStats = store.get('llcards', {});
 function stat(id){ return llStats[id] || (llStats[id] = { known: false, reps: 0, lapses: 0, ease: 2.5, interval: 0, due: 0, hist: [] }); }
 function saveLL(){ store.set('llcards', llStats); }
-let activeTab = 'f2l';
-const ll = { tabSet: 'LL', mode: settings.llMode || 'scramble', sets: settings.llSets || 'both', card: null, phase: 'idle', target: null, rem: [], fixes: 0, vstate: null, t0: 0, moves: [], revealed: false, learning: false, result: null, lastId: null };
+let activeTab = 'timer';
+const ll = { tabSet: 'LL', mode: settings.llMode || 'scramble', sets: settings.llSets === 'PLL' ? 'PLL' : 'OLL', card: null, phase: 'idle', target: null, rem: [], fixes: 0, vstate: null, t0: 0, moves: [], revealed: false, learning: false, result: null, lastId: null };
 
 // --- timing targets and grading ---
 function recentTimes(id){ return stat(id).hist.filter(h => h.ok).slice(-5).map(h => h.t); }
@@ -2486,6 +2486,7 @@ function randomLLState(card){
 function presentCard(card, opts){
   opts = opts || {};
   if (!solverReady) { toast('Still loading, try again in a second.'); return; }
+  if ((card.set === 'OLL' || card.set === 'PLL') && ll.sets !== card.set) { ll.sets = settings.llSets = card.set; store.set('settings', settings); renderDrillNav(); renderDeck(); }
   // Learning a new card: repeat it with the alg shown for as long as you like; "Test me" then asks
   // for 3 clean solves with the alg hidden before moving on.
   if (!ll.card || ll.card.id !== card.id) { ll.learnReps = 0; ll.lastRep = null; ll.lastDone = null; }
@@ -3014,12 +3015,10 @@ function dueText(due){
   return 'in ' + Math.round(d / DAY) + ' d';
 }
 function renderDeck(){
-  document.querySelectorAll('[data-llset]').forEach(b => b.setAttribute('aria-pressed', b.dataset.llset === ll.sets));
-  const now = Date.now();
+    const now = Date.now();
   let cards = LLCARDS.filter(inSets);
   const isF2L = ll.tabSet === 'F2L';
   $('deckSortRow').hidden = !isF2L;
-  document.querySelectorAll('[data-llset]').forEach(b => b.parentElement.hidden = isF2L);
   if (isF2L) {
     const order = settings.f2lSort || 'worst';
     $('deckSort').value = order;
@@ -3172,7 +3171,8 @@ function poolSettings(){
 }
 function poolCards(){
   const P = poolSettings();
-  let cs = LLCARDS.filter(c => !stat(c.id).known && (P.groups.length ? P.groups.includes(cardGroup(c)) : inSets(c)));
+  const gs = P.groups.filter(g => LLCARDS.some(c => inSets(c) && cardGroup(c) === g));
+  let cs = LLCARDS.filter(c => !stat(c.id).known && inSets(c) && (!gs.length || gs.includes(cardGroup(c))));
   const f = caseFreq();
   if (P.order === 'freq') cs.sort((a, b) => (f[b.id] || 0) - (f[a.id] || 0));
   else if (P.order === 'mine') cs.sort((a, b) => (a.set === 'F2L' ? ((f2lSeenStats(b) || {}).n || 0) - ((f2lSeenStats(a) || {}).n || 0) : seenInSolves(b) - seenInSolves(a)) || (f[b.id] || 0) - (f[a.id] || 0));
@@ -3180,7 +3180,7 @@ function poolCards(){
   else if (P.order === 'random') cs.sort(() => Math.random() - 0.5);
   return cs;
 }
-function inSetsTab(c){ return ll.tabSet === 'F2L' ? c.set === 'F2L' : c.set !== 'F2L'; }
+function inSetsTab(c){ return inSets(c); }
 function renderPool(){
   const P = poolSettings(), f = caseFreq();
   const groups = [];
@@ -3204,7 +3204,40 @@ function newCard(){
   stat(c.id).known = true; saveLL();
   presentCard(c, { learning: true });
 }
+// ---- drills: one top-level tab, with a sub-nav per method ----
+const DRILL_TABS = ['cross', 'f2l', 'f2lc', 'll', 'tricks', 'rxd'];
+const DRILL_SUBS = {
+  cfop: [['cross', 'Cross'], ['f2l', 'F2L'], ['oll', 'OLL'], ['pll', 'PLL'], ['tricks', 'Finger tricks']],
+  roux: [['fb', 'First block'], ['sb', 'Second block'], ['cmll', 'Corners (CMLL)'], ['lse', 'Last six edges'], ['tricks', 'Finger tricks']],
+};
+function curSub(){
+  const t = activeTab;
+  if (t === 'f2l' || t === 'f2lc') return 'f2l';
+  if (t === 'll') return ll.sets === 'PLL' ? 'pll' : 'oll';
+  if (t === 'rxd') return rd.kind;
+  return t;
+}
+function goSub(s){
+  if (s === 'f2l') return setTab(settings.f2lMode === 'cards' ? 'f2lc' : 'f2l');
+  if (s === 'oll' || s === 'pll') {
+    const set = s.toUpperCase();
+    if (ll.sets !== set) { ll.sets = settings.llSets = set; store.set('settings', settings); if (ll.tabSet === 'LL') { ll.card = null; ll.phase = 'idle'; ll.drill = null; ll.learnFlow = false; ll.test = null; } }
+    return setTab('ll');
+  }
+  if (RD_KINDS.some(([k]) => k === s)) { rd.kind = settings.rdKind = s; store.set('settings', settings); return setTab('rxd'); }
+  setTab(s);
+}
+function renderDrillNav(){
+  const nav = $('drillNav'); if (!nav) return;
+  nav.hidden = !DRILL_TABS.includes(activeTab);
+  if (nav.hidden) return;
+  const sub = curSub();
+  let h = '<div class="seg" role="group" aria-label="Drill">' + DRILL_SUBS[curMethod()].map(([k, n]) => '<button data-sub="' + k + '" aria-pressed="' + (k === sub) + '">' + n + '</button>').join('') + '</div>';
+  if (sub === 'f2l') h += '<div class="seg" role="group" aria-label="F2L mode"><button data-f2lmode="solve" aria-pressed="' + (activeTab === 'f2l') + '">Solve trainer</button><button data-f2lmode="cards" aria-pressed="' + (activeTab === 'f2lc') + '">Cards</button></div>';
+  nav.innerHTML = h;
+}
 function setTab(t){
+  if (t === 'drills') { const m = curMethod(); const last = (settings.drillSub || {})[m]; return goSub(DRILL_SUBS[m].some(([k]) => k === last) ? last : m === 'roux' ? rd.kind : 'f2l'); }
   const prev = activeTab;
   activeTab = t;
   if (TAB_METHOD[t] !== 'both' && TAB_METHOD[t] !== curMethod()) { settings.method = TAB_METHOD[t]; store.set('settings', settings); }
@@ -3214,7 +3247,13 @@ function setTab(t){
   if (prev === 'rxd' && t !== 'rxd') { cancelAnimationFrame(rd.raf); rd.phase = 'idle'; }
   const llLike = t === 'll' || t === 'f2lc';
   $('tabF2L').hidden = t !== 'f2l'; $('tabLL').hidden = !llLike; $('tabTimer').hidden = t !== 'timer'; $('tabPlan').hidden = t !== 'plan'; $('tabTricks').hidden = t !== 'tricks'; $('tabCross').hidden = t !== 'cross';
-  document.querySelectorAll('[data-tab]').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === t));
+  document.querySelectorAll('[data-tab]').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === t || (b.dataset.tab === 'drills' && DRILL_TABS.includes(t))));
+  if (DRILL_TABS.includes(t)) {
+    settings.drillSub = settings.drillSub || {}; settings.drillSub[curMethod()] = curSub();
+    if (t === 'f2l' || t === 'f2lc') settings.f2lMode = t === 'f2lc' ? 'cards' : 'solve';
+    store.set('settings', settings);
+  }
+  renderDrillNav();
   if (prev === 'f2l' && t !== 'f2l') { if (phase === 'solving') cancelAnimationFrame(rafId); practice = null; }
   if ((prev === 'll' || prev === 'f2lc') && t !== prev) { ll.phase = ll.phase === 'running' || ll.phase === 'scrambling' || ll.phase === 'between' ? 'idle' : ll.phase; ll.learnFlow = false; ll.test = null; }
   if (llLike) { const ts = t === 'f2lc' ? 'F2L' : 'LL'; if (ll.tabSet !== ts) { ll.tabSet = ts; ll.card = null; ll.phase = 'idle'; } }
@@ -3702,6 +3741,7 @@ function redoFromTimer(sid, key){
     const card = LLCARDS.find(c => c.name === step.case || c.name === step.case + ' perm');
     if (!card) return;
     const pos = kind === 'oll' ? E.applyMoves(s.start, s.moves.slice(0, sp.iF2L).map(x => x[0])) : E.applyMoves(s.start, s.moves.slice(0, stepEndIndex(sp, 'OLL')).map(x => x[0]));
+    ll.sets = settings.llSets = card.set; store.set('settings', settings);
     setTab('ll');
     const learning = !stat(card.id).known;
     if (learning) { stat(card.id).known = true; saveLL(); }
@@ -4096,7 +4136,7 @@ function tickRunBar(){
   $('rbLeft').textContent = r.pausedAt ? 'paused' : mmss(sitLeft) + ' left in session';
   $('rbProg').style.width = Math.min(100, Math.max(0, 100 * (1 - left / (st.min * 60e3)))).toFixed(1) + '%';
 }
-const TAB_LABEL = { roux: 'Roux timer', rxd: 'Roux drills', f2l: 'F2L', f2lc: 'F2L cards', ll: 'OLL & PLL', timer: 'Timer', plan: 'Practice', tricks: 'Finger tricks', cross: 'Cross' };
+const TAB_LABEL = { drills: 'Drills', roux: 'Timer', rxd: 'Drills', f2l: 'F2L', f2lc: 'F2L cards', ll: 'OLL & PLL', timer: 'Timer', plan: 'Practice', tricks: 'Finger tricks', cross: 'Cross' };
 function renderRunBar(){
   const bar = $('runBar'); const r = runState();
   if (settings.planRun && !r) saveRun(null); // a run from the old weekly plan
@@ -4496,7 +4536,7 @@ let rxSolves = store.get('rouxSolves', []);
 let rdLog = store.get('rouxDrills', []);
 const rx = { phase: 'idle', target: null, rem: [], scr: '', start: null, moves: [], t0: 0, inspStart: 0, raf: 0, viewId: rxSolves[0] ? rxSolves[0].id : null, lost: false, cache: null, justDone: false };
 const rd = { kind: settings.rdKind || 'fb', phase: 'idle', target: null, rem: [], start: null, moves: [], t0: 0, raf: 0, last: null };
-const TAB_METHOD = { plan: 'cfop', f2l: 'cfop', ll: 'cfop', f2lc: 'cfop', cross: 'cfop', timer: 'cfop', roux: 'roux', rxd: 'roux', tricks: 'both' };
+const TAB_METHOD = { plan: 'cfop', f2l: 'cfop', ll: 'cfop', f2lc: 'cfop', cross: 'cfop', timer: 'cfop', roux: 'roux', rxd: 'roux', tricks: 'both', drills: 'both' };
 function curMethod(){ return settings.method === 'roux' ? 'roux' : 'cfop'; }
 function applyMethod(){
   const m = curMethod();
@@ -4650,7 +4690,7 @@ function renderRxStats(){
     const worst = rows.slice().sort((a, b) => b.t - a.t)[0];
     h += '<p class="eyebrow" style="margin:8px 0 4px">Where the time goes (medians, last ' + withSp.length + ')</p><div class="tablewrap"><table><thead><tr><th>Step</th><th>Time</th><th>Share</th><th>Look</th><th>Moves</th></tr></thead><tbody>' +
       rows.map(x => '<tr><td style="font-family:var(--sans)">' + RX_LONG[x.k] + '</td><td>' + fmtT(x.t) + '</td><td>' + Math.round(100 * x.t / tot) + '%</td><td>' + fmtT(x.look) + '</td><td>' + x.mv + '</td></tr>').join('') + '</tbody></table></div>' +
-      '<p class="hint">Most of your time goes into ' + RX_LONG[worst.k].toLowerCase() + '. Roux drills has a drill for each step.</p>';
+      '<p class="hint">Most of your time goes into ' + RX_LONG[worst.k].toLowerCase() + '. Drills has one for each step.</p>';
     const opts = withSp.filter(s => s.fbOpt != null);
     if (opts.length >= 3) h += '<p class="hint">First block: ' + med(opts.map(s => s.split[0].mv)) + ' moves against a shortest of ' + med(opts.map(s => s.fbOpt)) + ' (medians).</p>';
   }
@@ -4769,8 +4809,7 @@ const RD_HINT = {
 function renderRd(){
   const box = $('rdBox'); if (!box) return;
   const r = rdRot();
-  let h = '<div class="row" style="gap:8px;flex-wrap:wrap"><div class="seg" role="group" aria-label="Step to drill">' + RD_KINDS.map(([k, n]) => '<button data-rdkind="' + k + '" aria-pressed="' + (k === rd.kind) + '">' + n + '</button>').join('') + '</div></div>' +
-    '<div class="row" style="margin-top:8px"><label class="hint" for="rdBlock">My first block</label><select id="rdBlock">' + ROUX.ROTS.map((_, i) => { const c = rotColors(i); return [i, c.bottom + ' bottom, ' + c.left + ' on the left']; }).sort((a, b) => a[1] < b[1] ? -1 : 1).map(([i, t]) => '<option value="' + i + '"' + (i === r ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></div>';
+  let h = '<div class="row"><label class="hint" for="rdBlock">My first block</label><select id="rdBlock">' + ROUX.ROTS.map((_, i) => { const c = rotColors(i); return [i, c.bottom + ' bottom, ' + c.left + ' on the left']; }).sort((a, b) => a[1] < b[1] ? -1 : 1).map(([i, t]) => '<option value="' + i + '"' + (i === r ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></div>';
   if (rd.phase === 'nocube') h += '<p class="phase-title" style="margin-top:12px">Connect your cube to drill</p><p class="hint">' + RD_HINT[rd.kind] + '</p>';
   else if (rd.phase === 'scrambling') {
     const toks = rd.rem.map((x, i) => '<span class="tok' + (i === 0 ? ' next' : '') + (x.fix ? ' fix' : '') + (x.partial && i === 0 ? ' part' : '') + '">' + wcaTok(x) + '</span>').join('');
@@ -4802,7 +4841,7 @@ function renderRdStats(){
 
 // ---------- wiring ----------
 $('btnConnect').onclick = connect;
-document.querySelectorAll('[data-method]').forEach(b => b.onclick = () => { settings.method = b.dataset.method; store.set('settings', settings); setTab(settings.method === 'roux' ? 'roux' : 'f2l'); });
+document.querySelectorAll('[data-method]').forEach(b => b.onclick = () => { settings.method = b.dataset.method; store.set('settings', settings); setTab(settings.method === 'roux' ? 'roux' : 'timer'); });
 $('tabRoux').addEventListener('click', (e) => {
   if (e.target.closest('[data-rxstop]')) { cancelAnimationFrame(rx.raf); toast('Solve stopped. It wasn\'t saved.'); rxNew(); return; }
   const db = e.target.closest('[data-rxdel]');
@@ -4911,11 +4950,14 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') inp.parentElement.querySelector('[data-sact="cancelName"]').click();
 });
 document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => setTab(b.dataset.tab));
+$('drillNav').addEventListener('click', (e) => {
+  const s = e.target.closest('[data-sub]'); if (s) { goSub(s.dataset.sub); return; }
+  const f = e.target.closest('[data-f2lmode]'); if (f) setTab(f.dataset.f2lmode === 'cards' ? 'f2lc' : 'f2l');
+});
 document.querySelectorAll('[data-llmode]').forEach(b => b.onclick = () => {
   ll.mode = b.dataset.llmode; settings.llMode = ll.mode; store.set('settings', settings);
   if (ll.card && (ll.phase === 'scrambling' || ll.phase === 'running')) presentCard(ll.card, { learnFlow: ll.learnFlow, test: ll.test, extra: ll.extra }); else renderLL();
 });
-document.querySelectorAll('[data-llset]').forEach(b => b.onclick = () => { ll.sets = b.dataset.llset; settings.llSets = ll.sets; store.set('settings', settings); renderDeck(); });
 $('llNext').onclick = nextCard;
 $('llNew').onclick = () => { ll.drill = null; newCard(); };
 $('drillBox').addEventListener('toggle', () => renderDeck());
@@ -5134,7 +5176,7 @@ async function boot(){
   Cube.initSolver(); solverReady = true; try { backfillLL(); } catch (e) {}
   $('bootBar').style.width = '15%';
   newScramble();
-  if (activeTab === 'roux' || activeTab === 'rxd') setTab(activeTab);
+  if (activeTab === 'roux' || activeTab === 'rxd' || activeTab === 'timer') setTab(activeTab);
   if (conn && needInitialSync) conn.sendCubeCommand({ type: 'REQUEST_FACELETS' }).catch(() => {});
   $('bootText').textContent = 'Building pair solver'; await tick();
   const g = E.buildTablesSteps(); let i = 0;
@@ -5148,7 +5190,7 @@ renderSessBars();
 applyMethod();
 boot();
 try { renderRunBar(); } catch (e) {}
-try { const tb = sessionStorage.getItem('slotwise.tab'); if (['ll', 'timer', 'f2lc', 'plan', 'tricks', 'cross', 'roux', 'rxd'].includes(tb)) setTab(tb); else if (curMethod() === 'roux') setTab('roux'); } catch (e) {}
+try { const tb = sessionStorage.getItem('slotwise.tab'); if (['ll', 'timer', 'f2lc', 'plan', 'tricks', 'cross', 'roux', 'rxd'].includes(tb)) setTab(tb); else setTab(curMethod() === 'roux' ? 'roux' : 'timer'); } catch (e) { setTab(curMethod() === 'roux' ? 'roux' : 'timer'); }
 window.__slotwise = { get rx(){ return rx; }, get rd(){ return rd; }, get rxSolves(){ return rxSolves; }, get rdLog(){ return rdLog; }, setTab, ROUX, get phase(){ return phase; }, get rem(){ return rem; }, get cur(){ return cur; }, get target(){ return target; }, get practice(){ return practice; }, get ll(){ return ll; }, get tm(){ return tm; }, caseFreq, poolCards, LLCARDS, pathBetween, renderTimer, get tSolves(){ return tSolves; }, get conn(){ return conn; }, set conn(v){ conn = v; }, retryScramble, handleTurn, queueVirtual, demoSolve, onCubeEvent, faceletsToUser, facelets };
 })();
 </script>
