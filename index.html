@@ -1583,8 +1583,27 @@ if (typeof module !== 'undefined' && module.exports) module.exports = api; else 
   // front: DL, FL and DLF). Everything else is random.
   function lpCase(back, rng) { return back ? randomState([6], [6, 10], rng) : randomState([5], [6, 9], rng); }
 
+  // One chosen 2-look case: kind 'oc' (twist the corners, by OC_ALGS name) or 'cp' (swap them,
+  // by PERM_ALGS name). Blocks done, the six edges and the M slice random.
+  function cmllCaseFor(kind, name, rng) {
+    rng = rng || Math.random;
+    const alg = (kind === 'oc' ? OC_ALGS : PERM_ALGS).find(x => x[0] === name)[1];
+    for (let tries = 0; tries < 200; tries++) {
+      let { s, k } = lseScramble(E.solved(), 24, rng);
+      const auf = () => { const q = Math.floor(rng() * 4); if (q) s = E.applyMove(s, mv(TOPF[k], q)); };
+      const undo = (a) => { s = E.applyMoves(s, E.invertMoves(E.parseAlg(a, frameFor(k)).moves)); };
+      if (kind === 'oc') { const p = Math.floor(rng() * 3); if (p) { auf(); undo(PERM_ALGS[p - 1][1]); } }
+      auf(); undo(alg); auf();
+      const n = pairN(s); if (n < 0) continue;
+      const N = norm(s, n);
+      if (kind === 'oc' ? ocName(N) === name : permName(N) === name.toLowerCase()) return s;
+    }
+    return null;
+  }
+  function cornersOriented(c) { const n = pairN(c); return n >= 0 && coDone(norm(c, n)); }
+
   const api = { ROTS, FMAP, conj, unconj, rotFor, rotFaces, fbN, sbN, pairN, norm, cornersAUF, stageDone, ocName, permName, OC_ALGS, PERM_ALGS, caseState,
-    stm, describe, fmFor, split, fbBuild, fbReady: () => !!FBT, fbDist, fbSolutions, fbdrDone, fbdrDist, fbdrSolutions, lpCase, randomState, lseScramble, lseCase, cmllCase, frameFor };
+    stm, describe, fmFor, split, fbBuild, fbReady: () => !!FBT, fbDist, fbSolutions, fbdrDone, fbdrDist, fbdrSolutions, lpCase, randomState, lseScramble, lseCase, cmllCase, frameFor, cmllCaseFor, cornersOriented };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.ROUX = api;
 })(typeof self !== 'undefined' ? self : this);
 </script>
@@ -3133,8 +3152,10 @@ function caseSVG(state, set, size){
   if (set === 'F2L') return f2lSVG(state, size);
   const f = facelets(state);
   const grey = 'var(--line)';
-  const col = (i) => set === 'OLL' ? (f[i] === 'U' ? llColorOf('U') : grey) : llColorOf(f[i]);
-  const side = (i) => set === 'OLL' ? (f[i] === 'U' ? llColorOf('U') : 'none') : llColorOf(f[i]);
+  // CO: corners only, top colour only (2-look CMLL, step 1); CP: corners only, all colours (step 2)
+  const co = set === 'CO', cpm = set === 'CP';
+  const col = (i) => (co || cpm) && i % 2 === 1 ? grey : set === 'OLL' || co ? (f[i] === 'U' ? llColorOf('U') : grey) : llColorOf(f[i]);
+  const side = (i, mid) => (co || cpm) && mid ? 'none' : set === 'OLL' || co ? (f[i] === 'U' ? llColorOf('U') : 'none') : llColorOf(f[i]);
   const u = size / 4.4, th = u * 0.38, gap = u * 0.12, g = u * 1.08;
   const x0 = u * 0.1 + th + gap, far = x0 + 2 * g + u + gap;
   let s = '<svg width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '" aria-hidden="true">';
@@ -3142,10 +3163,10 @@ function caseSVG(state, set, size){
   for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) rect(x0 + c * g, x0 + r * g, u, u, col(r * 3 + c));
   const B = [47, 46, 45], Fr = [18, 19, 20], Ls = [36, 37, 38], Rs = [11, 10, 9];
   for (let i = 0; i < 3; i++) {
-    rect(x0 + i * g, x0 - gap - th, u, th, side(B[i]));
-    rect(x0 + i * g, far, u, th, side(Fr[i]));
-    rect(x0 - gap - th, x0 + i * g, th, u, side(Ls[i]));
-    rect(far, x0 + i * g, th, u, side(Rs[i]));
+    rect(x0 + i * g, x0 - gap - th, u, th, side(B[i], i === 1));
+    rect(x0 + i * g, far, u, th, side(Fr[i], i === 1));
+    rect(x0 - gap - th, x0 + i * g, th, u, side(Ls[i], i === 1));
+    rect(far, x0 + i * g, th, u, side(Rs[i], i === 1));
   }
   return s + '</svg>';
 }
@@ -4977,7 +4998,7 @@ function renderRxStats(){
     const rows = ['FB', 'SB', 'CMLL', 'LSE'].map(k => { const xs = withSp.map(s => s.split.find(x => x.n === k)); const ys = xs.filter(x => x.st != null); return { k, t: med(xs.map(x => x.t)), look: med(xs.map(x => x.look)), st: ys.length ? med(ys.map(x => x.st)) : null, mv: med(xs.map(x => x.mv)) }; });
     const worst = rows.slice().sort((a, b) => b.t - a.t)[0];
     h += '<p class="eyebrow" style="margin:8px 0 4px">Where the time goes (medians, last ' + withSp.length + ')</p><div class="tablewrap"><table><thead><tr><th>Step</th><th>Time</th><th>Share</th><th>Look</th><th>Stopped</th><th>Moves</th></tr></thead><tbody>' +
-      rows.map(x => '<tr><td style="font-family:var(--sans)">' + RX_LONG[x.k] + '</td><td>' + fmtT(x.t) + '</td><td>' + Math.round(100 * x.t / tot) + '%</td><td>' + fmtT(x.look) + '</td><td>' + (x.st != null ? fmtT(x.st) : '') + '</td><td>' + x.mv + '</td></tr>').join('') + '</tbody></table></div>' +
+      rows.map(x => { return '<tr><td style="font-family:var(--sans)">' + RX_LONG[x.k] + '</td><td>' + fmtT(x.t) + '</td><td>' + Math.round(100 * x.t / tot) + '%</td><td>' + fmtT(x.look) + '</td><td>' + (x.st != null ? fmtT(x.st) : '') + '</td><td>' + x.mv + '</td></tr>'; }).join('') + '</tbody></table></div>' +
       '<p class="hint">Most of your time goes into ' + RX_LONG[worst.k].toLowerCase() + '. Drills has one for each step.</p>';
     const opts = withSp.filter(s => s.fbOpt != null);
     if (opts.length >= 3) h += '<p class="hint">First block: ' + med(opts.map(s => s.split[0].mv)) + ' moves against a shortest of ' + med(opts.map(s => s.fbOpt)) + ' (medians).</p>';
@@ -4991,6 +5012,38 @@ function renderRxStats(){
 
 // --- drills: one step at a time ---
 const RD_KINDS = [['fb', 'First block'], ['sb', 'Second block'], ['cmll', 'Corners (CMLL)'], ['lse', 'Last six edges']];
+// --- 2-look CMLL cards ---
+const CM_CARDS = ROUX.OC_ALGS.map(([n, a]) => ({ id: 'oc:' + n, w: 'oc', n, a })).concat(ROUX.PERM_ALGS.map(([n, a]) => ({ id: 'cp:' + n, w: 'cp', n, a })));
+function cmMode(){ return settings.cmllMode || 'cards'; }
+function cmRot(){ if (!Array.isArray(settings.cmllCards)) settings.cmllCards = ['oc:Sune']; return settings.cmllCards; }
+function cmCard(id){ return CM_CARDS.find(c => c.id === id) || null; }
+// last 5 first tries of a card: look + turn
+function cmStats(id){ const xs = rdLog.filter(x => x.k === 'cmll' && x.cc === id && x.first !== false), last = xs.slice(-5); return { n: xs.length, t: last.length ? last.reduce((a, x) => a + x.t + x.look, 0) / last.length : null }; }
+// the slower a card is next to the others in your rotation, the more it comes up; new ones come up a lot
+function cmPick(prev){
+  const ids = cmRot().filter(cmCard); if (!ids.length) return null;
+  const pool = ids.length > 1 && prev ? ids.filter(id => id !== prev) : ids;
+  const ts = pool.map(id => cmStats(id).t), known = ts.filter(x => x != null).sort((a, b) => a - b), med = known.length ? known[known.length >> 1] : null;
+  const w = pool.map((id, i) => Math.pow(ts[i] == null || !med ? 1.5 : ts[i] / med, 3) + 0.1);
+  let r = Math.random() * w.reduce((a, b) => a + b, 0);
+  for (let i = 0; i < pool.length; i++) { r -= w[i]; if (r <= 0) return cmCard(pool[i]); }
+  return cmCard(pool[pool.length - 1]);
+}
+function cmAlgShown(id){ const m = settings.cmllAlg || 'auto'; return m === 'show' || (m === 'auto' && cmStats(id).n < 5); }
+function cmPic(c, size){ try { return caseSVG(ROUX.caseState(c.a), c.w === 'oc' ? 'CO' : 'CP', size); } catch (e) { return ''; } }
+function cmCardsHtml(){
+  const rot = cmRot();
+  const tile = (c) => { const st = cmStats(c.id), on = rot.includes(c.id);
+    return '<div class="tile' + (on ? '' : ' unknown') + (rd.card === c.id ? ' cur' : '') + '" data-cmcard="' + c.id + '" title="' + esc(c.n + ': ' + c.a) + '"><label title="In my rotation"><input type="checkbox" data-cmrot="' + c.id + '"' + (on ? ' checked' : '') + '></label>' + cmPic(c, 64) +
+      '<span class="tname">' + esc(c.n) + '</span><span class="tmeta">' + (st.n ? st.n + '× · ' + fmt(st.t) + ' s' : 'not drilled') + '</span></div>'; };
+  const m = settings.cmllAlg || 'auto';
+  return '<div class="panel" style="padding:12px;margin-top:10px"><p class="eyebrow">2-look corner cards · ticked ones are in your rotation</p>' +
+    '<p class="hint" style="margin:4px 0 6px">1. Twist the corners so the top colour faces up</p><div class="deck">' + CM_CARDS.filter(c => c.w === 'oc').map(tile).join('') + '</div>' +
+    '<p class="hint" style="margin:10px 0 6px">2. Swap them so each side matches</p><div class="deck">' + CM_CARDS.filter(c => c.w === 'cp').map(tile).join('') + '</div>' +
+    '<div class="row" style="margin-top:10px"><label class="hint" for="cmAlg">Show the alg</label><select id="cmAlg">' + [['auto', 'For my first 5 tries of a card'], ['show', 'Always'], ['hide', 'Never (recognition practice)']].map(([k, n]) => '<option value="' + k + '"' + (k === m ? ' selected' : '') + '>' + n + '</option>').join('') + '</select></div>' +
+    '<p class="hint" style="margin-top:8px">Tap a card to drill it now. Suggested order: Sune (you know it), Antisune, Adjacent swap, Diagonal swap, then T, L and U, then Pi and H. ' +
+    'With Sune, Antisune and the two swaps you can already solve every case (repeat Sune or Antisune for the other twists); each new twist alg then replaces a repeat. Add one card at a time and keep it until it feels automatic.</p></div>';
+}
 function fbVar(){ return settings.fbVar || 'full'; }
 const FB_VARS = [['full', 'Whole block'], ['lp', 'Last pair'], ['lpdr', 'Last pair + DR']];
 function rdRot(){ return settings.rouxRot == null ? 0 : settings.rouxRot; }
@@ -5008,9 +5061,13 @@ function rdNew(){
     }
     else if (rd.kind === 'fb') { do { G = ROUX.randomState([], []); } while (ROUX.fbDist(G) < 4); }
     else if (rd.kind === 'sb') { do { G = ROUX.randomState([5, 6], [6, 9, 10]); } while (ROUX.pairN(G) >= 0); }
-    else if (rd.kind === 'cmll') G = ROUX.cmllCase();
+    else if (rd.kind === 'cmll') {
+      const prev = rd.card, want = rd.forceCard; rd.card = null; rd.forceCard = null;
+      if (cmMode() === 'cards') { const c = want ? cmCard(want) : cmPick(prev); if (c) { G = ROUX.cmllCaseFor(c.w, c.n); if (G) rd.card = c.id; } }
+      if (!G) G = ROUX.cmllCase();
+    }
     else G = ROUX.lseCase();
-    rd.target = ROUX.unconj(G, r); rd.attempt = 1; rd.v = rd.kind === 'fb' ? fbVar() : undefined;
+    rd.target = ROUX.unconj(G, r); rd.attempt = 1; rd.peek = false; if (rd.kind !== 'cmll') rd.card = null; rd.v = rd.kind === 'fb' ? fbVar() : undefined;
     rdArm();
   };
   if (rd.kind === 'fb') withFB($('rdBox'), go); else go();
@@ -5041,7 +5098,7 @@ function rdTurn(m, f, b, raw){
   if (rd.phase === 'ready') { rd.phase = 'running'; rd.t1 = raw && raw.localTimestamp != null ? raw.localTimestamp : performance.now(); renderRd(); rdLoop(); }
   if (rd.phase !== 'running') return;
   rd.moves.push({ m, raw });
-  const done = rd.kind === 'lse' ? E.equal(cur, E.solved()) : rd.kind === 'fb' && rd.v === 'lpdr' ? ROUX.fbdrDone(ROUX.conj(cur, rdRot())) : ROUX.stageDone(rd.kind, ROUX.conj(cur, rdRot()));
+  const done = rd.kind === 'lse' ? E.equal(cur, E.solved()) : rd.kind === 'fb' && rd.v === 'lpdr' ? ROUX.fbdrDone(ROUX.conj(cur, rdRot())) : rd.kind === 'cmll' && rd.card && rd.card.startsWith('oc:') ? ROUX.cornersOriented(ROUX.conj(cur, rdRot())) : ROUX.stageDone(rd.kind, ROUX.conj(cur, rdRot()));
   if (done) rdFinish();
 }
 function rdFinish(){
@@ -5068,12 +5125,16 @@ function rdFinish(){
       if (st) { L.steps = st.sub && st.sub.length ? st.sub : [st]; L.text = st.text; L.case = st.case; }
     }
   } catch (e) {}
+  if (rd.kind === 'cmll' && rd.card) {
+    L.card = rd.card; L.case = cmCard(rd.card).n; L.peek = rd.peek;
+    if (!L.text) try { L.text = ROUX.describe(moves, r, { anchorFrom: 0, fm0: ROUX.fmFor(ROUX.pairN(frame)) }).map(t => t.txt).join(' '); } catch (e) {}
+  }
   rd.last = L;
-  rdLog.push({ k: rd.kind, v: rd.v, d: Date.now(), t: L.t, look, stm: L.stm, opt: L.opt, pauses, c: L.case, first: rd.attempt === 1 }); rdSave();
+  rdLog.push({ k: rd.kind, v: rd.v, d: Date.now(), t: L.t, look, stm: L.stm, opt: L.opt, pauses, c: L.case, cc: L.card, first: rd.attempt === 1 && !L.peek }); rdSave();
   renderRdStats();
   rdNew();
 }
-function rdAgain(){ if (!rd.last) return; rd.kind = rd.last.kind; rd.v = rd.last.v; rd.target = E.clone(rd.last.target); rd.attempt = (rd.last.att || 1) + 1; rdArm(); }
+function rdAgain(){ if (!rd.last) return; rd.kind = rd.last.kind; rd.v = rd.last.v; rd.card = rd.last.card || null; rd.peek = false; rd.target = E.clone(rd.last.target); rd.attempt = (rd.last.att || 1) + 1; rdArm(); }
 const SOLS_NOTE = 'M and r count as one move each, like a face turn. Easiest to turn first: R, U, r and M before F, L, D and B. An x in front means tip the cube that way first; the block still ends up on the bottom left (the centres in the middle slice get fixed later).';
 function solsHtml(sols){ return sols.map(s => '<div class="scr small">' + s.text.split(' ').map(t => '<span class="tok' + (/^x/.test(t) ? ' rot' : '') + '">' + esc(t) + '</span>').join('') + '</div>').join(''); }
 function rdResultHtml(){
@@ -5108,7 +5169,10 @@ const RD_HINT = {
   cmll: 'Both blocks are done. Solve the four top corners; the edges do not matter yet.',
   lse: 'Blocks and corners are done. Finish with M and U turns only: orient the six edges, place the left and right ones, then the last four.',
 };
-function rdHint(){ return rd.kind === 'fb' && fbVar() !== 'full' ? RD_HINT[fbVar()] : RD_HINT[rd.kind]; }
+function rdHint(){
+  if (rd.kind === 'cmll' && rd.card) return rd.card.startsWith('oc:') ? 'Both blocks are done. Twist the four top corners so the top colour faces up; the clock stops as soon as they all do.' : 'Both blocks are done and the corners already show the top colour. Swap them so each side matches; any U turn at the end is fine.';
+  return rd.kind === 'fb' && fbVar() !== 'full' ? RD_HINT[fbVar()] : RD_HINT[rd.kind];
+}
 function renderRd(){
   const box = $('rdBox'); if (!box) return;
   const r = rdRot();
@@ -5117,6 +5181,13 @@ function renderRd(){
     const v = fbVar(), sq = settings.fbSq || 'back';
     h += '<div class="row" style="margin-top:8px"><div class="seg" role="group" aria-label="What to build">' + FB_VARS.map(([k, n]) => '<button data-fbvar="' + k + '" aria-pressed="' + (k === v) + '">' + n + '</button>').join('') + '</div>' +
       (v !== 'full' ? '<label class="hint" for="rdSq">Square built</label><select id="rdSq">' + [['back', 'At the back'], ['front', 'At the front'], ['either', 'Either']].map(([k, n]) => '<option value="' + k + '"' + (k === sq ? ' selected' : '') + '>' + n + '</option>').join('') + '</select>' : '') + '</div>';
+  }
+  if (rd.kind === 'cmll') h += '<div class="row" style="margin-top:8px"><div class="seg" role="group" aria-label="Corner cases">' + [['cards', 'Cards'], ['mix', 'Random cases']].map(([k, n]) => '<button data-cmmode="' + k + '" aria-pressed="' + (k === cmMode()) + '">' + n + '</button>').join('') + '</div></div>';
+  const cc = rd.kind === 'cmll' && rd.card && rd.phase !== 'nocube' ? cmCard(rd.card) : null;
+  if (cc) {
+    const show = cmAlgShown(cc.id) || rd.peek;
+    h += '<div class="llcard" style="margin-top:10px;gap:12px">' + (show ? cmPic(cc, 72) + '<div><b>' + esc(cc.n) + '</b>' + (cc.w === 'oc' ? ' <span class="hint">twist the corners</span>' : ' <span class="hint">swap the corners</span>') + '<br><code>' + esc(cc.a) + '</code></div>'
+      : hiddenSVG(72) + '<div><b>Which case is it?</b><br><button class="mini" data-cmpeek="1">Show the alg</button> <span class="hint">(a peek doesn\'t count toward your times)</span></div>') + '</div>';
   }
   if (rd.phase === 'nocube') h += '<p class="phase-title" style="margin-top:12px">Connect your cube to drill</p><p class="hint">' + rdHint() + '</p>';
   else if (rd.phase === 'scrambling') {
@@ -5127,7 +5198,7 @@ function renderRd(){
     h += '<p class="eyebrow" style="margin-top:12px">' + (rd.kind === 'fb' ? (rd.phase === 'ready' ? 'Plan it, then turn' : rd.v === 'lpdr' ? 'Finish the block and DR' : rd.v === 'lp' ? 'Finish the block' : 'Build the block') : 'Go') + '</p><div class="timer' + (rd.phase === 'ready' && rd.kind === 'fb' ? ' ready' : '') + '" id="rdTime">0</div>' +
       '<p class="hint">Hold ' + swc(c.bottom) + c.bottom + ' on the bottom and ' + swc(c.left) + c.left + ' on the left. ' + (rd.kind === 'fb' ? 'The number counts your planning time; the timer starts on your first turn.' : 'The clock is already running, so recognition counts.') + '</p>';
   }
-  h += '<div class="row" style="margin-top:8px"><button class="mini" data-rdnew="1">New scramble</button></div>' + rdResultHtml() + rdRefHtml();
+  h += '<div class="row" style="margin-top:8px"><button class="mini" data-rdnew="1">New scramble</button></div>' + rdResultHtml() + (rd.kind === 'cmll' && cmMode() === 'cards' ? cmCardsHtml() : rdRefHtml());
   box.innerHTML = h;
 }
 function renderRdStats(){
@@ -5162,12 +5233,18 @@ $('tabRoux').addEventListener('click', (e) => {
   const r = e.target.closest('tr[data-rxid]'); if (r) { rx.viewId = Number(r.dataset.rxid); renderRx(); renderRxStats(); }
 });
 $('tabRxd').addEventListener('click', (e) => {
+  const cr = e.target.closest('[data-cmrot]');
+  if (cr) { const rot = cmRot(), id = cr.dataset.cmrot; if (cr.checked) { if (!rot.includes(id)) rot.push(id); } else settings.cmllCards = rot.filter(x => x !== id); store.set('settings', settings); renderRd(); return; }
+  if (e.target.closest('.tile label')) return;
+  const ct = e.target.closest('[data-cmcard]'); if (ct) { rd.forceCard = ct.dataset.cmcard; rd.last = null; rdNew(); return; }
+  const cmm = e.target.closest('[data-cmmode]'); if (cmm) { settings.cmllMode = cmm.dataset.cmmode; store.set('settings', settings); rd.last = null; rdNew(); return; }
+  if (e.target.closest('[data-cmpeek]')) { rd.peek = true; renderRd(); return; }
   const fv = e.target.closest('[data-fbvar]'); if (fv) { settings.fbVar = fv.dataset.fbvar; store.set('settings', settings); rd.last = null; rdNew(); return; }
   const k = e.target.closest('[data-rdkind]'); if (k) { rd.kind = k.dataset.rdkind; settings.rdKind = rd.kind; store.set('settings', settings); rdNew(); return; }
   if (e.target.closest('[data-rdnew]')) { rdNew(); return; }
   if (e.target.closest('[data-rdagain]')) { rdAgain(); return; }
 });
-$('tabRxd').addEventListener('change', (e) => { if (e.target.id === 'rdSq') { settings.fbSq = e.target.value; store.set('settings', settings); rdNew(); return; } if (e.target.id === 'rdBlock') { settings.rouxRot = +e.target.value; store.set('settings', settings); rd.last = null; rdNew(); } });
+$('tabRxd').addEventListener('change', (e) => { if (e.target.id === 'cmAlg') { settings.cmllAlg = e.target.value; store.set('settings', settings); renderRd(); return; } if (e.target.id === 'rdSq') { settings.fbSq = e.target.value; store.set('settings', settings); rdNew(); return; } if (e.target.id === 'rdBlock') { settings.rouxRot = +e.target.value; store.set('settings', settings); rd.last = null; rdNew(); } });
 $('tabTricks').addEventListener('click', (e) => {
   const tg = e.target.closest('[data-trig]'); if (tg) { dr.alg = tg.dataset.trig; drillArm(); return; }
   if (e.target.closest('#trUse')) { const v = ($('trCustom').value || '').trim(); const p = E.parseAlg(v); if (!p || !p.moves.length) { toast('That is not an alg Slotwise can read.'); return; } if (p.perToken.some(n => n === 0)) { toast('Rotations can\'t be tracked in a drill; leave them out.'); return; } dr.alg = p.tokens.join(' '); drillArm(); return; }
