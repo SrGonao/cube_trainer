@@ -3742,6 +3742,9 @@ function llStepsHtml(){
 
 // --- flow ---
 // Timer scrambles are shown the WCA way (white on top, green in front), whatever your F2L grip.
+// Roux scrambles are written for how you hold the cube for your first block (Drills → My first block)
+function rouxTok(r){ return FACES[ROUX.FMAP[settings.rouxRot == null ? 0 : settings.rouxRot][r.f]] + (r.a === 1 ? '' : r.a === 2 ? '2' : "'"); }
+function rouxHold(){ const c = rotColors(settings.rouxRot == null ? 0 : settings.rouxRot); return 'Hold ' + swc(c.top) + c.top + ' on top and ' + swc(c.front) + c.front + ' in front for the scramble (so the first block ends up ' + c.bottom + ' bottom, ' + c.left + ' on the left).'; }
 function wcaTok(r){ const map = CUBE_TO_USER[settings.cross]; return map[FACES[r.f]] + (r.a === 1 ? '' : r.a === 2 ? '2' : "'"); }
 function tNewScramble(){
   if (!solverReady) return;
@@ -4969,12 +4972,12 @@ let rxFbSols = null;
 function renderRx(){
   const box = $('rxBox'); if (!box) return;
   let h = '';
-  if (rx.phase === 'nocube') h = '<p class="eyebrow">Roux timer</p><p class="phase-title">Connect your cube to time Roux solves</p><p class="hint">The cube times itself and splits the solve into first block, second block, corners and last six edges.</p><p class="orig">Scramble from solved: ' + esc(rx.scr) + '</p>';
+  if (rx.phase === 'nocube') h = '<p class="eyebrow">Roux timer</p><p class="phase-title">Connect your cube to time Roux solves</p><p class="hint">The cube times itself and splits the solve into first block, second block, corners and last six edges.</p><p class="orig">Scramble from solved: ' + esc(pathBetween(E.solved(), rx.target).map(rouxTok).join(' ')) + '</p><p class="hint">' + rouxHold() + '</p>';
   else if (rx.phase === 'scrambling') {
-    const toks = rx.rem.map((r, i) => '<span class="tok' + (i === 0 ? ' next' : '') + (r.fix ? ' fix' : '') + (r.partial && i === 0 ? ' part' : '') + '">' + wcaTok(r) + '</span>').join('');
+    const toks = rx.rem.map((r, i) => '<span class="tok' + (i === 0 ? ' next' : '') + (r.fix ? ' fix' : '') + (r.partial && i === 0 ? ' part' : '') + '">' + rouxTok(r) + '</span>').join('');
     h = (rx.justDone && rxSolves[0] ? '<p class="eyebrow">Last solve</p><div class="timer">' + fmtT(rxSolves[0].time) + '</div>' : '') +
       '<p class="eyebrow">Scramble · ' + rx.rem.length + ' to go</p><div class="scr">' + toks + '</div>' +
-      '<p class="hint">Hold white on top and green in front for the scramble. After that hold the cube any way you like: the timer starts on your first turn and stops when the cube is solved.</p>';
+      '<p class="hint">' + rouxHold() + ' After that hold the cube any way you like: the timer starts on your first turn and stops when the cube is solved.</p>';
   } else if (rx.phase === 'inspect') h = '<p class="eyebrow">' + (settings.inspection ? 'Inspection: plan your first block' : 'Ready') + '</p><div class="timer" id="rxTime">' + (settings.inspection ? '15' : '0.00') + '</div><p class="hint">Turn any face to start.</p>';
   else if (rx.phase === 'running') h = '<p class="eyebrow">Solving</p><div class="timer" id="rxTime">0.00</div><div class="row"><button data-rxstop="1">Stop without saving</button></div>';
   else if (rx.phase === 'done') h = '<p class="eyebrow">Solved</p><div class="timer">' + (rxSolves[0] ? fmtT(rxSolves[0].time) : '') + '</div>';
@@ -5191,8 +5194,8 @@ function renderRd(){
   }
   if (rd.phase === 'nocube') h += '<p class="phase-title" style="margin-top:12px">Connect your cube to drill</p><p class="hint">' + rdHint() + '</p>';
   else if (rd.phase === 'scrambling') {
-    const toks = rd.rem.map((x, i) => '<span class="tok' + (i === 0 ? ' next' : '') + (x.fix ? ' fix' : '') + (x.partial && i === 0 ? ' part' : '') + '">' + wcaTok(x) + '</span>').join('');
-    h += '<p class="eyebrow" style="margin-top:12px">Scramble' + (rd.attempt > 1 ? ' · same one again' : '') + ' · ' + rd.rem.length + ' to go</p><div class="scr">' + toks + '</div><p class="hint">White on top, green in front for the scramble. ' + rdHint() + '</p>';
+    const toks = rd.rem.map((x, i) => '<span class="tok' + (i === 0 ? ' next' : '') + (x.fix ? ' fix' : '') + (x.partial && i === 0 ? ' part' : '') + '">' + rouxTok(x) + '</span>').join('');
+    h += '<p class="eyebrow" style="margin-top:12px">Scramble' + (rd.attempt > 1 ? ' · same one again' : '') + ' · ' + rd.rem.length + ' to go</p><div class="scr">' + toks + '</div><p class="hint">' + rouxHold() + ' ' + rdHint() + '</p>';
   } else if (rd.phase === 'ready' || rd.phase === 'running') {
     const c = rotColors(r);
     h += '<p class="eyebrow" style="margin-top:12px">' + (rd.kind === 'fb' ? (rd.phase === 'ready' ? 'Plan it, then turn' : rd.v === 'lpdr' ? 'Finish the block and DR' : rd.v === 'lp' ? 'Finish the block' : 'Build the block') : 'Go') + '</p><div class="timer' + (rd.phase === 'ready' && rd.kind === 'fb' ? ' ready' : '') + '" id="rdTime">0</div>' +
