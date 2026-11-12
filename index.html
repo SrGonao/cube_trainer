@@ -130,8 +130,7 @@ button:disabled{opacity:.5;cursor:default}
 .s1{background:var(--c1)}.s2{background:var(--c2)}.s3{background:var(--c3)}.s4{background:var(--c4)}
 .lg-look,.lg-turn{display:inline-block;width:14px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px;background:var(--muted)}
 .lg-look{opacity:.38}
-.sb-row i.stop{background:repeating-linear-gradient(135deg,var(--warn) 0 3px,transparent 3px 6px)}
-.lg-stop{display:inline-block;width:14px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px;background:repeating-linear-gradient(135deg,var(--warn) 0 3px,transparent 3px 6px)}
+.bar-names{display:flex;gap:2px;margin-top:3px}.bar-names span{min-width:2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;text-align:center;font:600 11px var(--sans);color:var(--muted)}
 .sb-row i.redo{cursor:pointer}
 .sb-row i.redo:hover,.sb-row i.redo:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
 button.mini{padding:2px 8px;font-size:12px}
@@ -4892,15 +4891,32 @@ function rxAnalyse(s){
 }
 const RX_CLS = { FB: 's1', SB: 's2', CMLL: 's3', LSE: 's4' };
 const RX_LONG = { FB: 'First block', SB: 'Second block', CMLL: 'Corners (CMLL)', LSE: 'Last six edges' };
-function rxStepsHtml(steps){
-  const total = steps.reduce((x, y) => x + y.t, 0) || 1;
-  let h = '<div class="splitbar" role="img" aria-label="' + esc(steps.map(x => x.name + ' ' + fmtT(x.t)).join(', ')) + '">' + steps.map(x => {
-    const cls = RX_CLS[x.name] || 's1';
-    return '<div class="sb-step" style="flex:' + Math.max(x.t, total * 0.04) + '"><span class="sb-t">' + fmtT(x.t) + '</span><div class="sb-row">' +
-      (x.look > 0 ? '<i class="' + cls + ' look" style="flex:' + x.look + '" title="' + x.name + ': look ' + fmtT(x.look) + '"></i>' : '') +
-      (x.stop > 0 ? '<i class="stop" style="flex:' + x.stop + '" title="' + x.name + ': stopped ' + fmtT(x.stop) + '"></i>' : '') +
-      '<i class="' + cls + '" style="flex:' + Math.max(x.t - x.look - (x.stop || 0), 1) + '" title="' + x.name + ': turn ' + fmtT(x.t - x.look - (x.stop || 0)) + '"></i></div><span class="sb-n">' + x.name + '</span></div>';
-  }).join('') + '</div><div class="bar-legend" style="margin:4px 0 10px"><span><i class="lg-look"></i>lighter: looking</span><span><i class="lg-stop"></i>stopped mid-step (0.5 s or more)</span><span><i class="lg-turn"></i>solid: turning</span></div>';
+function rxStepsHtml(steps, moves){
+  // Like the F2L view: for each step, the look before it, then turning broken by any stops, in order.
+  let bar = '', names = '', look = 0, stop = 0, nStops = 0, turn = 0;
+  const mv = moves || [];
+  for (const x of steps) {
+    const parts = []; let prevT = x.from > 0 && mv[x.from - 1] ? mv[x.from - 1][1] : (mv[0] ? mv[0][1] : 0), runStart = null;
+    for (let i = x.from; i < x.to && mv[i]; i++) {
+      const t = mv[i][1], g = t - prevT;
+      if (i === x.from) { if (g > 0) { parts.push(['r', g, x.name + ': look ' + fmt(g)]); look += g; } runStart = t; }
+      else if (g >= STOP_MS) { parts.push(['e', Math.max(prevT - runStart, 1), x.name + ': turning ' + fmt(prevT - runStart)]); turn += prevT - runStart; parts.push(['p', g, x.name + ': stopped ' + fmt(g)]); stop += g; nStops++; runStart = t; }
+      prevT = t;
+    }
+    if (runStart != null) { parts.push(['e', Math.max(prevT - runStart, 1), x.name + ': turning ' + fmt(prevT - runStart)]); turn += prevT - runStart; }
+    const w = Math.max(parts.reduce((a2, y) => a2 + y[1], 0), 1);
+    bar += '<div style="flex:' + w + '">' + parts.map(y => '<div class="' + y[0] + '" style="flex:' + y[1] + '" title="' + esc(y[2]) + '"></div>').join('') + '</div>';
+    names += '<span style="flex:' + w + '">' + esc(x.name) + ' ' + fmtT(x.t) + '</span>';
+  }
+  const tot = look + stop + turn || 1, nMoves = steps.reduce((a2, x) => a2 + (x.mv || 0), 0);
+  const stat1 = (v, k, big) => '<div class="stat' + (big ? ' big' : '') + '"><div class="v">' + v + '</div><div class="k">' + k + '</div></div>';
+  let h = '<div class="summary" style="margin-top:10px">' +
+    stat1(fmt(turn), 'turning · ' + Math.round(100 * turn / tot) + '%', true) +
+    stat1(fmt(stop), 'stopped mid-step · ' + Math.round(100 * stop / tot) + '% · ' + nStops + ' stop' + (nStops === 1 ? '' : 's')) +
+    stat1(fmt(look), 'looking before steps · ' + Math.round(100 * look / tot) + '%') +
+    stat1(turn > 0 ? (nMoves / (turn / 1000)).toFixed(1) : '—', 'moves / s while turning') + '</div>' +
+    '<div style="margin-top:14px"><div class="bar">' + bar + '</div><div class="bar-names">' + names + '</div>' +
+    '<div class="bar-legend" style="margin:6px 0 10px"><span><i style="background:var(--recog)"></i>looking before a step</span><span><i style="background:var(--warn)"></i>stopped mid-step (0.5 s or more)</span><span><i style="background:var(--accent)"></i>turning</span></div></div>';
   const row = (x, sub) => '<tr' + (sub ? ' class="hint"' : '') + '><td style="font-family:var(--sans)' + (sub ? ';padding-left:18px' : '') + '">' + esc(sub ? x.name : (RX_LONG[x.name] || x.name)) + '</td><td>' + fmtT(x.t) + '</td><td>' + fmtT(x.look) + '</td><td>' + (x.stop ? fmtT(x.stop) + (x.stops > 1 ? ' <span class="hint">(' + x.stops + ')</span>' : '') : '—') + '</td><td>' + fmtT(x.t - x.look - (x.stop || 0)) + '</td><td>' + x.mv + '</td><td style="font-family:var(--sans);white-space:normal">' + esc(x.case || '') + '</td></tr>';
   h += '<div class="tablewrap"><table><thead><tr><th>Step</th><th>Time</th><th>Look</th><th>Stopped</th><th>Turn</th><th>Moves</th><th>Case</th></tr></thead><tbody>' +
     steps.map(x => row(x) + (x.sub || []).map(y => row(y, true)).join('')).join('') + '</tbody></table></div>';
@@ -4916,7 +4932,7 @@ function rxDetailHtml(){
   const a = rxAnalyse(s);
   if (!a) return h + '<p class="hint">Slotwise could not find two finished blocks in this solve, so there are no splits.</p>';
   const col = rotColors(a.r);
-  h += rxStepsHtml(a.steps);
+  h += rxStepsHtml(a.steps, s.moves);
   const fb = a.steps.find(x => x.name === 'FB');
   const opt = ROUX.fbReady() ? ROUX.fbDist(ROUX.conj(s.start, a.r)) : s.fbOpt;
   h += '<p class="hint">Blocks: ' + swc(col.bottom) + col.bottom + ' on the bottom, ' + swc(col.left) + col.left + ' block first.' +
