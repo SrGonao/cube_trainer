@@ -5023,24 +5023,64 @@ function cmMode(){ return settings.cmllMode || 'cards'; }
 function cmRot(){ if (!Array.isArray(settings.cmllCards)) settings.cmllCards = ['oc:Sune']; return settings.cmllCards; }
 function cmCard(id){ return CM_CARDS.find(c => c.id === id) || null; }
 // last 5 first tries of a card: look + turn
-function cmStats(id){ const xs = rdLog.filter(x => x.k === 'cmll' && x.cc === id && x.first !== false), last = xs.slice(-5); return { n: xs.length, t: last.length ? last.reduce((a, x) => a + x.t + x.look, 0) / last.length : null }; }
+function cmStats(id){ const xs = rdLog.filter(x => x.k === 'cmll' && x.cc === id && x.first !== false), last = xs.slice(-5), ck = xs.filter(x => x.errs != null).slice(-10);
+  return { n: xs.length, t: last.length ? last.reduce((a, x) => a + x.t + x.look, 0) / last.length : null, clean: ck.length ? ck.filter(x => !x.errs).length / ck.length : null }; }
 // the slower a card is next to the others in your rotation, the more it comes up; new ones come up a lot
 function cmPick(prev){
   const ids = cmRot().filter(cmCard); if (!ids.length) return null;
   const pool = ids.length > 1 && prev ? ids.filter(id => id !== prev) : ids;
   const ts = pool.map(id => cmStats(id).t), known = ts.filter(x => x != null).sort((a, b) => a - b), med = known.length ? known[known.length >> 1] : null;
-  const w = pool.map((id, i) => Math.pow(ts[i] == null || !med ? 1.5 : ts[i] / med, 3) + 0.1);
+  const w = pool.map((id, i) => { const cl = cmStats(id).clean; return Math.pow(ts[i] == null || !med ? 1.5 : ts[i] / med, 3) + (cl == null ? 0 : (1 - cl) * 2) + 0.1; });
   let r = Math.random() * w.reduce((a, b) => a + b, 0);
   for (let i = 0; i < pool.length; i++) { r -= w[i]; if (r <= 0) return cmCard(pool[i]); }
   return cmCard(pool[pool.length - 1]);
 }
 function cmAlgShown(id){ const m = settings.cmllAlg || 'auto'; return m === 'show' || (m === 'auto' && cmStats(id).n < 5); }
 function cmPic(c, size){ try { return caseSVG(ROUX.caseState(c.a), c.w === 'oc' ? 'CO' : 'CP', size); } catch (e) { return ''; } }
+// Follow the card's alg as you turn, like the CFOP cards: every U turn before it is allowed, the
+// alg is written the way you hold the cube (block on the bottom left, any M-slice offset).
+function cmDone(c, st){ const b = ROUX.conj(st, rdRot()); return c.w === 'oc' ? ROUX.cornersOriented(b) : ROUX.stageDone('cmll', b); }
+function cmBuildPaths(){
+  rd.paths = null; rd.follow = null; rd.off = []; rd.errs = 0;
+  const c = rd.card && cmCard(rd.card); if (!c) return;
+  const r = rdRot(), k = ROUX.pairN(ROUX.conj(cur, r)); if (k < 0) return;
+  const fr = ROUX.frameFor(k), toCur = (m) => ROUX.FMAP[r].indexOf((m / 3) | 0) * 3 + m % 3;
+  const paths = [], seen = new Set();
+  for (const pre of ['', 'U ', 'U2 ', "U' "]) {
+    const parsed = E.parseAlg(pre + c.a, fr); if (!parsed) continue;
+    const ms = parsed.moves.map(toCur), key = ms.join(',');
+    if (seen.has(key) || !cmDone(c, E.applyMoves(cur, ms))) continue;
+    seen.add(key); paths.push({ text: pre + c.a, parsed, idx: pathIndex(cur, ms) });
+  }
+  // names of the faces as you hold the cube, for the undo hint
+  const inv = {}; for (const x in fr) inv[fr[x]] = x;
+  rd.holdName = (m) => { const g = FACES[ROUX.FMAP[r][(m / 3) | 0]]; return (inv[g] || g) + ['', '2', "'"][m % 3]; };
+  rd.paths = paths; rd.follow = paths[0] ? { path: paths[0], pr: { i: 0, acc: 0 } } : null;
+}
+function cmTrack(m){
+  if (!rd.paths || !rd.paths.length) return;
+  const key = stateKey(cur); let best = null;
+  for (const p of rd.paths) { const pr = p.idx.get(key); if (!pr) continue; const sc = pr.i * 2 + (pr.acc ? 1 : 0) + (rd.follow && rd.follow.path === p ? 0.5 : 0); if (!best || sc > best.sc) best = { path: p, pr, sc }; }
+  if (best) { rd.follow = { path: best.path, pr: best.pr }; rd.off = []; }
+  else { if (!rd.off.length) rd.errs++; pushOff(rd.off, m); }
+}
+function cmProgressHtml(show){
+  if (!rd.follow) return '';
+  const { path, pr } = rd.follow;
+  let h = '<div class="scr' + (show ? '' : ' boxes') + '" aria-label="Your progress through the alg">';
+  if (show) h += algTextHtml(path.parsed, pr);
+  else { const fp = firstPendingToken(path.parsed, pr); path.parsed.tokens.forEach((t, ti) => { if (path.parsed.perToken[ti] === 0) return; h += '<span class="tok box ' + (ti < fp ? 'did' : ti === fp ? (rd.off.length ? 'bad' : 'next' + (pr.acc ? ' part' : '')) : '') + '"></span>'; }); }
+  h += '</div>';
+  if (rd.off.length) h += '<div class="flag"><strong>Not the alg.</strong> Undo with <code>' + esc(E.invertMoves(rd.off).map(rd.holdName).join(' ')) + '</code>' + (show ? '' : ', or keep going if you use a different alg') + '.</div>';
+  else if (pr.i > 0 || pr.acc) h += '<p class="hint">' + (show ? 'On track.' : 'On track: each box is one move of the alg.') + '</p>';
+  else h += '<p class="hint">' + (show ? 'A U turn first is fine if the case is not lined up.' : 'Each box is one move of the alg. They fill in as you do it correctly.') + '</p>';
+  return h;
+}
 function cmCardsHtml(){
   const rot = cmRot();
   const tile = (c) => { const st = cmStats(c.id), on = rot.includes(c.id);
     return '<div class="tile' + (on ? '' : ' unknown') + (rd.card === c.id ? ' cur' : '') + '" data-cmcard="' + c.id + '" title="' + esc(c.n + ': ' + c.a) + '"><label title="In my rotation"><input type="checkbox" data-cmrot="' + c.id + '"' + (on ? ' checked' : '') + '></label>' + cmPic(c, 64) +
-      '<span class="tname">' + esc(c.n) + '</span><span class="tmeta">' + (st.n ? st.n + '× · ' + fmt(st.t) + ' s' : 'not drilled') + '</span></div>'; };
+      '<span class="tname">' + esc(c.n) + '</span><span class="tmeta">' + (st.n ? st.n + '× · ' + fmt(st.t) + ' s' + (st.clean != null ? ' · ' + Math.round(st.clean * 100) + '% clean' : '') : 'not drilled') + '</span></div>'; };
   const m = settings.cmllAlg || 'auto';
   return '<div class="panel" style="padding:12px;margin-top:10px"><p class="eyebrow">2-look corner cards · ticked ones are in your rotation</p>' +
     '<p class="hint" style="margin:4px 0 6px">1. Twist the corners so the top colour faces up</p><div class="deck">' + CM_CARDS.filter(c => c.w === 'oc').map(tile).join('') + '</div>' +
@@ -5083,7 +5123,7 @@ function rdArm(){
   rd.rem = pathBetween(cur, rd.target);
   if (rd.rem.length) { rd.phase = 'scrambling'; renderRd(); } else rdReady();
 }
-function rdReady(){ rd.phase = 'ready'; rd.t0 = performance.now(); rd.start = E.clone(cur); rd.moves = []; renderRd(); rdLoop(); }
+function rdReady(){ rd.phase = 'ready'; rd.t0 = performance.now(); rd.start = E.clone(cur); rd.moves = []; if (rd.kind === 'cmll') cmBuildPaths(); renderRd(); rdLoop(); }
 function rdLoop(){
   cancelAnimationFrame(rd.raf);
   const step = () => {
@@ -5103,8 +5143,10 @@ function rdTurn(m, f, b, raw){
   if (rd.phase === 'ready') { rd.phase = 'running'; rd.t1 = raw && raw.localTimestamp != null ? raw.localTimestamp : performance.now(); renderRd(); rdLoop(); }
   if (rd.phase !== 'running') return;
   rd.moves.push({ m, raw });
+  if (rd.kind === 'cmll' && rd.card) cmTrack(m);
   const done = rd.kind === 'lse' ? E.equal(cur, E.solved()) : rd.kind === 'fb' && rd.v === 'lpdr' ? ROUX.fbdrDone(ROUX.conj(cur, rdRot())) : rd.kind === 'cmll' && rd.card && rd.card.startsWith('oc:') ? ROUX.cornersOriented(ROUX.conj(cur, rdRot())) : ROUX.stageDone(rd.kind, ROUX.conj(cur, rdRot()));
   if (done) rdFinish();
+  else if (rd.kind === 'cmll' && rd.card) renderRd();
 }
 function rdFinish(){
   cancelAnimationFrame(rd.raf);
@@ -5131,11 +5173,11 @@ function rdFinish(){
     }
   } catch (e) {}
   if (rd.kind === 'cmll' && rd.card) {
-    L.card = rd.card; L.case = cmCard(rd.card).n; L.peek = rd.peek;
+    L.card = rd.card; L.case = cmCard(rd.card).n; L.peek = rd.peek; L.errs = rd.paths && rd.paths.length ? rd.errs : null;
     if (!L.text) try { L.text = ROUX.describe(moves, r, { anchorFrom: 0, fm0: ROUX.fmFor(ROUX.pairN(frame)) }).map(t => t.txt).join(' '); } catch (e) {}
   }
   rd.last = L;
-  rdLog.push({ k: rd.kind, v: rd.v, d: Date.now(), t: L.t, look, stm: L.stm, opt: L.opt, pauses, c: L.case, cc: L.card, first: rd.attempt === 1 && !L.peek }); rdSave();
+  rdLog.push({ k: rd.kind, v: rd.v, d: Date.now(), t: L.t, look, stm: L.stm, opt: L.opt, pauses, c: L.case, cc: L.card, errs: L.errs, first: rd.attempt === 1 && !L.peek }); rdSave();
   renderRdStats();
   rdNew();
 }
@@ -5148,7 +5190,7 @@ function rdResultHtml(){
   let h = '<div class="panel" style="padding:12px;margin-top:8px"><p class="eyebrow">Last one' + (L.att > 1 ? ' · attempt ' + L.att : '') + '</p><div class="summary">' +
     stat1(fmt(L.t), L.kind === 'fb' ? 'turning time' : 'turning') + stat1(fmt(L.look), L.kind === 'fb' ? 'planning' : 'recognition') +
     stat1(L.stm + (L.opt != null ? ' / ' + L.opt : ''), L.opt != null ? 'your moves / shortest' : 'moves') + stat1(L.pauses, 'pauses over 0.5 s') + '</div>';
-  if (L.case) h += '<p style="margin:8px 0 0">Case: <b>' + esc(L.case) + '</b></p>';
+  if (L.case) h += '<p style="margin:8px 0 0">Case: <b>' + esc(L.case) + '</b>' + (L.errs == null ? '' : L.errs ? ' · <span style="color:var(--warn)">went off the alg ' + (L.errs === 1 ? 'once' : L.errs + ' times') + '</span>' : ' · <span style="color:var(--accent)">done with the alg, no mistakes</span>') + '</p>';
   if (L.steps && L.steps.length > 1) h += '<div class="tablewrap" style="margin-top:6px"><table><thead><tr><th>Part</th><th>Look</th><th>Turn</th><th>Moves</th></tr></thead><tbody>' +
     L.steps.map(x => '<tr><td style="font-family:var(--sans)">' + esc(x.name) + (x.case ? ' <span class="hint">' + esc(x.case) + '</span>' : '') + '</td><td>' + fmt(x.look) + '</td><td>' + fmt(x.t - x.look) + '</td><td>' + x.mv + '</td></tr>').join('') + '</tbody></table></div>';
   if (L.text) h += '<p class="hint" style="margin:8px 0 2px">Your moves</p><div class="scr small">' + L.text.split(' ').map(t => '<span class="tok">' + esc(t) + '</span>').join('') + '</div>';
@@ -5191,8 +5233,10 @@ function renderRd(){
   const cc = rd.kind === 'cmll' && rd.card && rd.phase !== 'nocube' ? cmCard(rd.card) : null;
   if (cc) {
     const show = cmAlgShown(cc.id) || rd.peek;
-    h += '<div class="llcard" style="margin-top:10px;gap:12px">' + (show ? cmPic(cc, 72) + '<div><b>' + esc(cc.n) + '</b>' + (cc.w === 'oc' ? ' <span class="hint">twist the corners</span>' : ' <span class="hint">swap the corners</span>') + '<br><code>' + esc(cc.a) + '</code></div>'
-      : hiddenSVG(72) + '<div><b>Which case is it?</b><br><button class="mini" data-cmpeek="1">Show the alg</button> <span class="hint">(a peek doesn\'t count toward your times)</span></div>') + '</div>';
+    const live = (rd.phase === 'ready' || rd.phase === 'running') && rd.follow;
+    h += '<div class="llcard" style="margin-top:10px;gap:12px">' + (show ? cmPic(cc, 72) + '<div><b>' + esc(cc.n) + '</b>' + (cc.w === 'oc' ? ' <span class="hint">twist the corners</span>' : ' <span class="hint">swap the corners</span>') + (live ? '' : '<br><code>' + esc(cc.a) + '</code>') + '</div>'
+      : hiddenSVG(72) + '<div><b>Which case is it?</b><br><button class="mini" data-cmpeek="1">Show the alg</button> <span class="hint">(a peek doesn\'t count toward your times)</span></div>') + '</div>' +
+      (live ? cmProgressHtml(show) : '');
   }
   if (rd.phase === 'nocube') h += '<p class="phase-title" style="margin-top:12px">Connect your cube to drill</p><p class="hint">' + rdHint() + '</p>';
   else if (rd.phase === 'scrambling') {
