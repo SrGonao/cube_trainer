@@ -287,6 +287,10 @@ tbody tr:hover,tbody tr.sel{background:var(--accent-soft)}
           <select id="setTimer"><option value="scramble">When the scramble is finished</option><option value="firstTurn">On your first turn</option></select>
           <label for="setAdvAlgs">Advanced algs (piece in the wrong slot)</label>
           <select id="setAdvAlgs"><option value="0">Off until I press the toggle</option><option value="1">Always on</option></select>
+          <label for="setBackSlot">Back-slot pairs</label>
+          <select id="setBackSlot"><option value="rot">Rotate, then use the front alg</option><option value="norot">Insert at the back, no rotation</option></select>
+          <label for="setF2LScr">Scrambles</label>
+          <select id="setF2LScr"><option value="random">Random</option><option value="back">Easiest pair at the back (back-slot practice)</option></select>
           <label for="setAdv">Optimal (computer-found) solutions</label>
           <select id="setAdv"><option value="0">Hidden until I press Show</option><option value="1">Always shown</option></select>
           <span>Saved MAC addresses</span>
@@ -296,7 +300,7 @@ tbody tr:hover,tbody tr.sel{background:var(--accent-soft)}
       <details>
         <summary>Algorithm list</summary>
         <div class="stage" style="gap:8px">
-          <p class="hint">This is J Perm's "Best F2L Algorithms" sheet. You can paste your own list instead. Write one alg per line; columns separated by wide spaces also work. Lines after a heading with "Advanced", "Expert" or "Section 2/3" count as advanced algs, and a heading with "Basic" or "Section 1" switches back. Case names and numbers are ignored. Algs for the front-right slot work best. Slotwise works out which case each alg solves and adds rotations and U turns as needed.</p>
+          <p class="hint">This is J Perm's "Best F2L Algorithms" sheet. You can paste your own list instead. Write one alg per line; columns separated by wide spaces also work. Lines after a heading with "Advanced", "Expert" or "Section 2/3" count as advanced algs, and a heading with "Basic" or "Section 1" switches back. Case names and numbers are ignored. Algs for the front-right slot work best. Slotwise works out which case each alg solves and adds rotations and U turns as needed. With <b>Back-slot pairs: insert at the back</b> on, back pairs use the front/back mirror of your algs or a built-in sheet of back-slot inserts (R, U and L turns, F where needed), whichever is easier to turn.</p>
           <textarea id="algText" rows="8" spellcheck="false"></textarea>
           <div class="row"><button class="primary" id="btnAlgSave">Use this list</button><button id="btnAlgReset">Back to J Perm's list</button></div>
           <p class="hint" id="algStatus"></p>
@@ -392,6 +396,7 @@ tbody tr:hover,tbody tr.sel{background:var(--accent-soft)}
         </div>
         <div class="row"><button class="primary" id="llNext">Next card</button><button id="llNew">New card</button></div>
       </div>
+      <div class="row" id="f2lSlotRow" hidden><label for="f2lSlotSel">Pair goes in</label><select id="f2lSlotSel"><option value="any">Any slot</option><option value="back">A back slot (no rotation)</option><option value="3">Back right only</option><option value="2">Back left only</option></select></div>
       <div id="llBox"></div>
       <div id="cube3dWrap" hidden>
         <div class="scene" id="scene"><div class="cube3d" id="cube3d"></div></div>
@@ -642,7 +647,8 @@ aes-js/index.js:
   function solveSlot(state, target, keep, opts) {
     ensureTables();
     opts = opts || {};
-    const allowD = !!opts.allowD;
+    const allowD = !!opts.allowD || !!(opts.faceMask && (opts.faceMask & 8));
+    const faceMask = opts.faceMask || 0; // only these faces (bit f for FACES[f]), e.g. U, R, L for back-slot inserts
     const maxSol = opts.maxSolutions || 200;
     const maxDepth = opts.maxDepth || 16;
     const nodeBudget = opts.nodeBudget || 4e7;
@@ -676,6 +682,7 @@ aes-js/index.js:
         if (f === lastFace) continue;
         if (lastFace >= 0 && (f + 3) % 6 === lastFace && f < lastFace) continue;
         if (f === 3 && !allowD) continue;
+        if (faceMask && !((faceMask >> f) & 1)) continue;
         for (let p = 0; p < 3; p++) {
           const m = f * 3 + p;
           const d1 = d + 1;
@@ -881,12 +888,29 @@ aes-js/index.js:
     return { moves, perToken, turns, tokens: toks, frames };
   }
 
+  // Front/back mirror of an alg: F and B swap and every turn reverses (R U R' -> R' U' R). x and y
+  // reverse too; z (an F-B axis turn) and S keep their direction. A front-right alg becomes a
+  // back-right one with no rotation, a front-left alg a back-left one.
+  function mirrorFB(line) {
+    const toks = tokenizeAlg(line); if (!toks) return null;
+    const flip = (suf) => (suf === '' ? "'" : suf === "'" ? '' : suf);
+    return toks.map(t => {
+      const [, base, w, suf] = TOKEN_RE.exec(t);
+      const b2 = { F: 'B', B: 'F', f: 'b', b: 'f' }[base] || base;
+      return b2 + w + (base === 'z' || base === 'S' ? suf : flip(suf));
+    }).join(' ');
+  }
+  // y, x or z anywhere in the alg: the cube gets rotated while doing it
+  function hasRotation(text) { return /(^|\s)[xyz]/.test(text); }
+  // rough effort of the turns as written (B and D are awkward, R and U easy)
+  function turnCost(text) { const t = tokenizeAlg(text) || []; let c = 0; for (const x of t) { const f = x[0].toUpperCase(); if (f === 'B') c += 3.2; else if (FACE_COST[f]) c += FACE_COST[f]; else if (x[0] === 'M' || x[0] === 'E' || x[0] === 'S') c += 1.3; } return c; }
+
   // ----- algorithm library (e.g. a pasted J Perm list) -----
   const ROT_PREFIX = ['', 'y ', 'y2 ', "y' "];
   const AUFS = ['', 'U ', "U' ", 'U2 '];
   // Sections: lines mentioning "Section 2/3", "advanced" or "expert" start advanced algs;
   // "Section 1" or "basic" switch back. Columns separated by 3+ spaces are separate algs.
-  function buildAlgLib(text) {
+  function buildAlgLib(text, backText) {
     const lines = String(text || '').split(/\n|\s\/\s|;|,(?=\s*[A-Za-z(])|\s{3,}|\t/);
     const entries = [], seen = new Set();
     let advanced = false;
@@ -920,6 +944,28 @@ aes-js/index.js:
       }
       entries.push({ text: line, turns: base.turns, combos, order: entries.length, advanced, multi: broken.length > 1 });
     }
+    // Back-slot versions: the front/back mirror of every alg, so back pairs can go in without a
+    // rotation. Only used when back-slot inserts are asked for (see matchAlg).
+    const nFront = entries.length;
+    const addBack = (line, order, advanced, multi) => {
+      if (!line || seen.has(line)) return;
+      const base = parseAlg(line); if (!base || !base.moves.length) return;
+      seen.add(line);
+      const combos = [], texts = new Set();
+      for (let k = 0; k < 4; k++) for (let a = 0; a < 4; a++) {
+        const text2 = normalizeAlg(k, a, line);
+        if (texts.has(text2)) continue; texts.add(text2);
+        const pr = parseAlg(text2); if (!pr) continue;
+        const s2 = applyMoves(solved(), pr.moves);
+        const slots = [0, 1, 2, 3].filter(j => !slotSolved(s2, j));
+        combos.push({ k, auf: a, text: text2, moves: pr.moves, slots, turns: pr.turns, parsed: pr });
+      }
+      entries.push({ text: line, turns: base.turns, combos, order, advanced, multi, back: true });
+    };
+    for (let i = 0; i < nFront; i++) { const e = entries[i]; addBack(mirrorFB(e.text), e.order, e.advanced, e.multi); }
+    // a ready-made back-slot sheet (shortest inserts using R, U and L, with F where needed)
+    String(backText || '').split('\n').forEach((l, i) => addBack(l.trim(), 1000 + i, false, false));
+    for (const e of entries) for (const c of e.combos) { c.rotated = hasRotation(c.text); c.cost = turnCost(c.text); }
     return { entries };
   }
   // Write "y^k U^a alg" readably: y turns and U turns commute, so fold the extra rotation into the
@@ -944,11 +990,15 @@ aes-js/index.js:
   // Preference: basic algs first, then no extra rotation, then the list's own order (the author's first choice for a
   // case comes first), then fewer turns. Advanced algs only when asked for.
   const K_COST = [0, 1, 2, 1];
-  function matchAlg(lib, state, target, keep, advanced) {
+  // With noRotBack (or lib.noRotBack) a back-slot pair prefers an alg done without any rotation,
+  // the easiest to turn first; the mirrored back-slot algs are only used then.
+  function matchAlg(lib, state, target, keep, advanced, noRotBack) {
     if (!lib) return null;
     let best = null;
+    const back = (noRotBack == null ? !!lib.noRotBack : noRotBack) && (target === 2 || target === 3);
     // basic before advanced, then no extra rotation, then list order, then fewer turns
-    const rank = (c, e) => [e.advanced ? 1 : 0, K_COST[c.k], e.order, c.turns];
+    const rank = back ? (c, e) => [e.advanced ? 1 : 0, c.rotated ? 1 : 0, c.cost, e.order]
+      : (c, e) => [e.advanced ? 1 : 0, K_COST[c.k], e.order, c.turns];
     let bestRank = null;
     const better = (c, e) => {
       if (!bestRank) return true;
@@ -958,6 +1008,7 @@ aes-js/index.js:
     };
     for (const e of lib.entries) {
       if (e.advanced && !advanced) continue;
+      if (e.back && !back) continue;
       for (const c of e.combos) {
       if (!c.slots.includes(target)) continue;
       if (!better(c, e)) continue;
@@ -965,7 +1016,7 @@ aes-js/index.js:
       if (!crossSolved(s) || !slotSolved(s, target)) continue;
       let ok = true; for (const j of keep) if (!slotSolved(s, j)) { ok = false; break; }
       if (!ok) continue;
-      best = Object.assign({ order: e.order, algText: e.text, advanced: e.advanced }, c);
+      best = Object.assign({ order: e.order, algText: e.text, advanced: e.advanced, back: !!e.back }, c);
       bestRank = rank(c, e);
       }
     }
@@ -1036,7 +1087,7 @@ aes-js/index.js:
     }
     // number the cases in list order: the first basic alg that solves a front-right case names it
     const cases = [], keyToCase = new Map();
-    const entries = lib.entries.filter(e => !e.advanced).sort((a, b) => (a.multi ? 1 : 0) - (b.multi ? 1 : 0) || a.order - b.order);
+    const entries = lib.entries.filter(e => !e.advanced && !e.back).sort((a, b) => (a.multi ? 1 : 0) - (b.multi ? 1 : 0) || a.order - b.order);
     for (const e of entries) for (const c of e.combos) {
       if (!c.slots.includes(0)) continue;
       for (const [k, r] of reps) {
@@ -1079,7 +1130,7 @@ aes-js/index.js:
 
   const api = { FACES, SLOT_NAMES, solved, clone, mult, inverse, equal, applyMove, applyMoves, parseMoves, moveName, invertMoves,
     crossSolved, slotSolved, solvedSlots, f2lSolved, buildTablesSteps, ensureTables, solveSlot, prettyAlg, bestSolution,
-    mergeQuarterTurns, analyzeSolve, parseAlg, tokenizeAlg, buildAlgLib, matchAlg, algCoverage, pieceStuck, buildF2LCases, f2lCaseOf, slotKey, normalizeAlg, basicPlacement, randomCrossSolved, framedMoves, bestFrame, MOVE_CUBES };
+    mergeQuarterTurns, analyzeSolve, parseAlg, tokenizeAlg, buildAlgLib, matchAlg, mirrorFB, hasRotation, algCoverage, pieceStuck, buildF2LCases, f2lCaseOf, slotKey, normalizeAlg, basicPlacement, randomCrossSolved, framedMoves, bestFrame, MOVE_CUBES };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.F2L = api;
 })(typeof self !== 'undefined' ? self : this);
 </script>
@@ -1450,10 +1501,13 @@ const store = {
 };
 const settings = Object.assign({ cross: 'white', threshold: 2, allowD: false, timerStart: 'scramble', algText: null, alwaysAdv: false, alwaysAdvAlgs: false }, store.get('settings', {}));
 const BUILTIN_ALGS = "# Section 1: Basic F2L\nU2 (R U R') U (R U' R')\ny U2 (L' U' L) U' (L' U L)\ny F R U2 R' F'\nF' L' U2 L F\nU (R U2 R') U (R U' R')\ny U' (L' U2 L) U' (L' U L)\nU (R U' R') U' (R U' R' U R U' R')\ny U' (L' U L) U (L' U L U' L' U L)\nU (F R' F' R) U (R U R')\ny U' (F' L F L') U' (L' U' L)\nU2 (L F' L' F) (R U R')\ny U2 (R F' R' F) (L' U' L)\ny U L' U' (L2 F' L' F) (L' U L)\nU' R U (R2' F R F') (R U' R')\ny F' (U' L' U L) F (L' U L)\nF (U R U' R') F' (R U' R')\ny' U2 R U' R' U' S R' S'\ny2 U2 L' U L U S' L S\n(R U2 R') U' (R U R')\ny (L' U2 L) U (L' U' L)\n(R U R')\ny (L' U' L)\nU' (R U R') U (R U R')\ny U (L' U' L) U' (L' U' L)\nU2 (R U' R') U' (R U R')\ny U2 (L' U L) U (L' U' L)\nR' U R2 U R'\ny L U' L2' U' L\nR' U2 R2 U R2' U R\ny L U2 L2' U' L2 U' L'\n(R U' R') U (R U' R') U2 (R U' R')\ny (L' U L) U' (L' U L) U2 (L' U L)\nR' U2 R2 U R'\ny L U2 L2' U' L\ny U L' U2 L U' y' R U R'\nU' (R U2 R') U y (L' U' L)\nU' (R U' R') U (R U R')\ny U (L' U L) U' (L' U' L)\ny U' (L' U L)\nU (R U' R')\ny U (L' U2 L) U2 (L' U L)\nU' (R U2 R') U2 (R U' R')\nr' U2 R2 U R2' U r\ny l U2 L2' U' L2 U' l'\nU' (R U R') U2 (R U' R')\ny U (L' U' L) U2 (L' U L)\ny U l' U L U' L' U' l\nU' r U' R' U R U r'\nM U (L F' L') U' M'\ny M U' (R' F R) U M'\nU' (R' U R) U' (R U R')\ny U (L U' L') U (L' U' L)\ny (L' U L) y' U2 (R U R')\n(R U' R') y U2 (L' U' L)\ny' (R2' F R F' R) U2 (R' U R)\ny2 (L2 F' L' F L') U2 (L U' L')\ny2 (f' L f) U2 (L U L')\ny' (f R' f') U2 R' U' R\nU (R U R') U2 (R U R')\ny U' (L' U' L) U2 (L' U' L)\nU' (R U2 R') U (R U R')\ny U (L' U2 L) U' (L' U' L)\ny U (L' U L) U2 (L' U L)\nU' R U' R' U2 R U' R'\nU (F' U' F) U' (R U R')\ny U' (F U F') U (L' U' L)\ny U2 (L' U' L) (F' L F L')\nU2 (R U R') (F R' F' R)\ny U' M' (U' L' U l) (L' U L)\nU M' (U R U' r') (R U' R')\ny U' (L U F' L' F) (L' U L)\nU (R' U' F R F') (R U' R')\ny' U2 (R' U' R) y U (R U' R')\ny2 U2 (L U L') y' U' (L' U L)\ny' U2 R' U' M U' R U M'\ny2 U2 L U M U L' U' M'\ny2 U (f' L' f) U' (L U L')\ny' U' (f R f') U (R' U' R)\n(U R U' R')3\nU' (R' F R F') (R U' R')\n(R U' R') (F' U2 F)\ny' R' U R' F R F' R\ny' U' (R' U2 R) (f R f')\n(R U R') U' (R U R')\ny (L' U' L) U (L' U' L)\ny M' (U' L' U L) (U' L' U l)\nM' (U R U' R') (U R U' r')\ny (L F' L' F)2\n(R' F R F')2\n(R U' R') U (R U' R')\ny (L' U L) U' (L' U L)\nU' (R' F R F') (R U R')\ny U (L F' L' F) (L' U' L)\n(R' F' R) (U R U' R') F\ny (L F L') (U' L' U L) F'\nU' F' (R U R' U') (R' F R)\ny U F (L' U' L U) (L F' L')\ny U' (L' U L) (F' L F L')\nU (R U' R') (F R' F' R)\ny2 U' M U L U' M' U L'\ny' U M U' R' U M' U' R\ny' U' R' U M U' R U M'\ny2 U L U' M U L' U' M'\n(R U' R') U (R U2 R' U R U' R')\ny' (L' U L) U' (L' U2' L U' L' U L)\ny' (L' U L) U (L' U' L U2' L' U L)\n(R U' R') U' (R U R' U2 R U' R')\n(R U' R') (F' L' U2 L F)\ny (L' U L) (F R U2' R' F')\ny (F R U2' R' F') (L' U' L)\n(F' L' U2 L F) (R U R')\ny2 L2 F U F' U' L' U L'\ny' R2' F' U' F U R U' R\ny' R' U R' U' F' U F R2\ny2 L U' L U F U' F' L2'\nR2' U2' F R2 F' U2' R' U R'\ny L2 U2 F' L2' F U2 L U' L\ny' (f R' f') U (R' U2' R) U (R' U2' R)\ny2 (f' L f) U' (L U2 L') U' (L U2 L')\n# Section 2: Advanced F2L\nU' R' U R2 U' R'\ny U L U' L2' U L\nU2 (R' U R) U' (S R S')\ny U2 (L U' L') U (S' L' S)\ny R' F R2 U' R' U2 F'\nL F' L2' U L U2' F\ny2 U2 (L F' L' F) (L U L')\ny' U2 (R' F R F') (R' U' R)\nU2 L2' u L2 u' L2'\nL F' U F L'\ny U2 R2 u' R2' u R2\ny R' F U' F' R\ny' U2 L2' u' L2 u L2'\ny' (L' u' L) U' (L' u L)\ny2 U2 R2 u R2' u' R2\ny2 (R u R') U (R u' R')\nR' U' R2 U R'\ny L U L2' U' L\nF D R D' F'\ny F' D' L' D F\ny R (F U F') R'\nL' (F' U' F) L\ny2 F (L U L') F'\ny' F' (R' U' R) F\ny' R u R u' R'\ny2 L' u' L' u L\nU' (L' U' L) (R U' R')\nU (R U R') (L' U L)\ny U2 L' U' L2 U L2' U' L\ny' U2' R U R2' U' R2 U R'\n(F U2 F') (R U R')\ny (F' U2 F) (L' U' L)\ny L U2 L' F U F'\nR' U2 R F' U' F\ny' R U2 R' f R f'\ny2 L' U2 L f' L' f\nU (R U R') (L U L')\ny U' (L' U' L) (R' U' R)\nU' (R U2 R') U' (L U L')\ny U (L' U2 L) U (R' U' R)\ny U (L' U L) (R' U R)\nU' (R U' R') (L U' L')\nU2 F' (L U L') F\ny U2' F (R' U' R) F'\ny U2 L' (B U B') L\nU2' R (B' U' B) R'\ny' U2 R' (F U F') R\ny2 U2' L (F' U' F) L'\ny2 f' U L U' f\ny' f U' R' U f'\nU (R U' R') (L' U L)\ny (L' U2 L) U' (L U L')\ny U2 (L' U L) U' (L U2 L')\nU2 (R U' R') U (L' U' L)\ny U' L' U' L2 U2 L'\ny (F' L F L') U' (L U2 L')\n(R U R') U' (L' U L)\nU' (R U R') (F U F')\ny (S' L S)\ny U (L' U L) U (L U L')\ny U' (F U F') (L U L')\ny U' (L' U L) (R U' R')\n(R U2 R') U (R' U' R)\nU2 (R U' R') U (R' U2 R)\n(F R' F' R) U (R' U2 R)\nU R U R2' U2 R\ny U2 (L' U L) U' (R U R')\n(S R' S')\nU (F U' F') (R' U' R)\ny (L' U' L) U (R U' R')\nU' (R U' R') U' (R' U R)\ny U (L' U' L) (F' U' F)\nU' (F' U F) (L U2 L')\nU (R U' R') U (f' L f)\ny U' (L' U L) U' (f R' f')\ny U (F U' F') (R' U2 R)\n(R U' R') (L U2 L')\n(R U R') (f' L f)\ny (L' U' L) (f R' f')\ny (L' U L) (R' U2 R)\n(R U' R') U (L U L')\n(R' F R F') (L U2 L')\ny (L F' L' F) (R' U2 R)\ny (L' U' L) U' (R' U' R)\n# Section 3: Expert F2L\nR2 U' R2' U R2\nf' R' U R f\ny2 L2' U' L2 U L2'\ny R' u' R u R\ny F' R' F2 R F\ny' L' u' L u L\ny2 f' D' L D f\ny L2' U L2 U' L2'\ny f L U' L' f'\ny' R2 U R2' U' R2\nL u L' u' L'\nF L F2' L' F'\ny2 R u R' u' R'\ny' f D R' D' f'\nL2' u' L2 u L2'\n(L' u' L) U (L' u L)\ny' R2 u R2' u' R2\ny' (R u R') U' (R u' R')\ny L2' u L2 u' L2'\ny (L u L') U' (L u' L')\ny2 R2 u' R2' u R2\ny2 (R' u' R) U (R' u R)\nR' F R2 U' R2' F' R\ny L F' L2' U L2 F L'\nL F' L2' U' L2 F L'\ny R' F R2 U R2' F' R\ny (f' L' f) U' (L' U L)\n(f R f') U (R U' R')\ny' (R U R') U' (f R' f')\ny2 (L' U' L) U (f' L f)\ny2 (f R f') (L U2 L')\ny' (f' L' f) (R' U2' R)\nR (L U2 L') R'\ny L' (R' U2 R) L\nL F2' L' F U' F\ny R' F2 R F' U F'\n(L F' L' U' F) U' (R U R')\ny (R' F R U F') U (L' U' L)\ny (L U' F' L' F) (L' U L)\n(R' U F R F') (R U' R')\n(R' F R U' F') (R U' R')\ny (L F' L' U F) (L' U L)\ny (L' U' L) U (S' L' S)\n(R U R') U' (S R S')\n(L' U L) (M' U R U' r') (R U' R')\ny (R U' R') (M' U' L' U l) (L' U L)\ny (L U F' L' F) U2 (L' U' L)\n(R' U' F R F') U2 (R U R')\ny (L U L') (F U F') U' (L' U L)\n(R' U' R) (F' U' F) U (R U' R')\n(R' F R U' F') U (R U' R')\ny (L F' L' U F) U' (L' U L)\nR U' R2' u' R' u R\ny L' U L2 u L u' L'\ny2 L U' L2' u' L' u L\ny' R' U R2 u R u' R'";
+// Back-slot inserts without a rotation for all 41 cases in BR and BL, found by search with only
+// R, U, L (and F when needed) turns, then mirrored left-right. Used when back-slot inserts are on.
+const BACK_ALGS = "F R2 U' R2 U R2 U F'\nR' U R U2 R' U' R\nL U2 R' F U' F' R U2 L'\nU' R' U2 R U2 R' U2 R\nU2 R' F' U' F2 R' F' R2\nU2 R2 U2 R U R' U R2\nR' U2 F R U R' U' F' R\nR' U2 R U R' U' R\nU2 R' F' U F U2 R\nR' U' R\nR2 U' F' U F R2\nU R' U' R U' R' U' R\nU R' U' F R' F' R U' R\nR U2 R2 U' R2 U' R'\nR' U F' U F2 R' F' R2\nU R' U R U' R' U' R\nU2 R' U2 R\nU R' F' U' F R\nU R' U2 R U R' U2 R\nF R U R2 U' R F'\nR2 F' U' F U R2\nU R' U' R U R' U2 R\nR' U F' U F U2 R\nR' U R' U2 R2 U R2 U R2\nU R' U R U R' U2 R\nU R' U2 R U' R' U' R\nU R' F R' F' R U' R\nR' U' R2 U2 F R' F' U2 R'\nR2 U' R2 U' R2 U2 R2\nR' U R' F R F' R\nR' F' U F2 R' F' R U' R\nU R' U' R U R' U' R\nR' U2 R' F R F' R\nU R' U R U2 R' U2 R\nR U2 F R' F' U2 R'\nR U R U R2 U' R' U' R'\nR2 U2 R U R' U R U2 R\nR' U2 R' U' R U' R' U2 R2\nR' U R' U' F' U F R2\nR2 F' U' F U R U' R\nR' U R F R U R2 U' R F'\nU2 R U' L U R' L'\nF' L2 U L2 U' L2 U' F\nU L U2 L' U2 L U2 L'\nR' U2 L F' U F L' U2 R\nU2 L2 U2 L' U' L U' L2\nU2 L F U F2 L F L2\nL U2 L' U' L U L'\nL U2 F' L' U' L U F L'\nL U L'\nU2 L F U' F' U2 L'\nU' L U L' U L U L'\nL2 U F U' F' L2\nL' U2 L2 U L2 U L\nU' L U F' L F L' U L'\nU' L U' L' U L U L'\nL U' F U' F2 L F L2\nU' L F U F' L'\nU2 L U2 L'\nF' L' U' L2 U L' F\nU' L U2 L' U' L U2 L'\nU' L U L' U' L U2 L'\nL2 F U F' U' L2\nL U' L U2 L2 U' L2 U' L2\nL U' F U' F' U2 L'\nU L U R U' L' U R'\nU R U' L U R' U' L'\nL U L2 U2 F' L F U2 L\nU' L F' L F L' U L'\nL2 U L2 U L2 U2 L2\nL U' L F' L' F L'\nU' L U L' U' L U L'\nL F U' R U2 R' U2 F' L'\nU' L U' L' U2 L U2 L'\nL F U2 R U' R' F' L'\nL2 U L2 U L U' L U' L2\nL U2 F U' F' U2 L'\nL U2 L U L' U L U2 L2\nL2 U2 L' U' L U' L' U2 L'\nL2 F U F' U' L' U L'\nL U' L U F U' F' L2\nL U' L' F' L' U' L2 U L' F";
 let algLib = null;
 let showAdv = !!settings.alwaysAdv;
 let showAdvAlgs = !!settings.alwaysAdvAlgs;
-function rebuildAlgLib(){ algLib = E.buildAlgLib(settings.algText || BUILTIN_ALGS); }
+function rebuildAlgLib(){ algLib = E.buildAlgLib(settings.algText || BUILTIN_ALGS, BACK_ALGS); algLib.noRotBack = settings.backSlot === 'norot'; }
 rebuildAlgLib();
 function noAlgText(o){ return o.stuck ? (showAdvAlgs ? 'no alg for this case: a piece is in another slot' : 'a piece is in another slot, which the advanced algs cover') : 'no alg in your list for this case'; }
 function algListName(){ return settings.algText ? 'Your list' : 'J Perm'; }
@@ -1512,9 +1566,26 @@ function faceletsToUser(fl){
 }
 
 // ---------- scramble flow ----------
+// Easiest pair (by list alg, back pairs without rotating) and whether it is at the back.
+function slotEase(st){
+  return [0, 1, 2, 3].map(j => { const m = E.matchAlg(algLib, st, j, [], false, true); return m ? m.turns : 99; });
+}
+function backScramble(){
+  let best = null;
+  const t0 = performance.now();
+  for (let i = 0; i < 400 && performance.now() - t0 < 250; i++) {
+    const st = E.randomCrossSolved(); if (E.solvedSlots(st).length) continue;
+    const e = slotEase(st), b = Math.min(e[2], e[3]), f = Math.min(e[0], e[1]);
+    const sc = (b <= f ? 0 : 10) + b; // a back pair that is the easiest, and short
+    if (!best || sc < best.sc) best = { st, sc };
+    if (b <= f && b <= 7) break;
+  }
+  return best.st;
+}
 function newScramble(){
   if (!solverReady) return;
-  do { target = E.randomCrossSolved(); } while (E.solvedSlots(target).length);
+  if (settings.f2lScr === 'back') target = backScramble();
+  else do { target = E.randomCrossSolved(); } while (E.solvedSlots(target).length);
   rem = pathBetween(cur, target);
   origScramble = rem.map(tokText).join(' ');
   rem.forEach(r => r.fix = false);
@@ -1820,7 +1891,7 @@ function startSolve(state, fromScramble){
   rafId = requestAnimationFrame(loop);
 }
 function recordMove(m, raw){
-  solveMoves.push({ m, local: raw.localTimestamp, cube: raw.cubeTimestamp, face: raw.face, direction: raw.direction, move: raw.move });
+  solveMoves.push({ m, local: raw.localTimestamp, cube: raw.cubeTimestamp, face: raw.face, direction: raw.direction, move: raw.move, yaw: yawState.yaw });
   if (E.f2lSolved(cur)) finishSolve();
 }
 function finishSolve(){
@@ -1840,8 +1911,10 @@ function finishSolve(){
   }
   const rec = {
     id: Date.now(), date: new Date().toISOString(), time: times[times.length - 1],
-    start: solveStart, moves: solveMoves.map((x, i) => [x.m, Math.round(times[i])]), scramble: origScramble,
+    start: solveStart, moves: solveMoves.map((x, i) => x.yaw == null ? [x.m, Math.round(times[i])] : [x.m, Math.round(times[i]), Math.round(x.yaw)]), scramble: origScramble,
   };
+  if (solveMoves.some(x => x.yaw != null)) rec.gyro = true;
+  if (settings.f2lScr === 'back') rec.backMode = true;
   if (solveFromScramble) rec.fromScramble = true;
   if (retryOf != null) rec.retryOf = retryOf;
   lastTime = rec.time;
@@ -1880,7 +1953,7 @@ function summarize(A){
 }
 
 // ---------- rendering ----------
-function setPhase(p){ phase = p; renderPhase(); }
+function setPhase(p){ phase = p; if (p === 'ready') yawBase(); renderPhase(); }
 function renderPhase(){
   const box = $('phaseBox');
   if (phase === 'loading') { box.innerHTML = '<p class="eyebrow">Getting ready</p><p class="phase-title">Loading the scrambler…</p>'; return; }
@@ -1894,7 +1967,7 @@ function renderPhase(){
   }
   if (phase === 'ready') {
     if (retryOf != null) { box.innerHTML = '<p class="eyebrow">Cross is solved · practice</p><p class="phase-title">Same position as ' + esc(recLabel(retryOf)) + '</p><p class="hint">No timer and nothing is saved. Try the suggested pairs on the right.</p>'; return; }
-    box.innerHTML = '<p class="eyebrow">Cross is solved</p><div class="timer ready" id="timer">0.00</div><p class="hint">Inspect as long as you like. Rotations don\'t count. The timer starts on your first turn and stops when all four pairs are in.</p>';
+    box.innerHTML = '<p class="eyebrow">Cross is solved' + (settings.f2lScr === 'back' ? ' · back-slot practice' : '') + '</p><div class="timer ready" id="timer">0.00</div><p class="hint">' + (settings.f2lScr === 'back' ? 'The easiest pair is at the back. Find it and put it in without rotating. ' : '') + 'Inspect as long as you like. Rotations don\'t count. The timer starts on your first turn and stops when all four pairs are in.</p>';
     return;
   }
   if (phase === 'practice' && practice) { renderPractice(box); return; }
@@ -2013,6 +2086,20 @@ function renderAnalysis(rec, A){
     '<div style="margin-top:14px"><div class="bar">' + bar + '</div>' +
     '<div class="bar-legend" style="margin-top:6px"><span><i style="background:var(--recog)"></i>looking before a pair</span><span><i style="background:var(--warn)"></i>stopped mid-pair (0.5 s or more)</span><span><i style="background:var(--accent)"></i>turning</span></div></div>' +
     stopCompareHtml(rec);
+  // rotation per pair, from the gyro: compare yaw during the pair with yaw at the end of the one before
+  const yawAt = (i) => (i < 0 ? 0 : (mv[i] && mv[i].length > 2 ? mv[i][2] : null));
+  const segRot = (s) => {
+    if (!rec.gyro) return null;
+    let ref = null; for (let i = s.from - 1; i >= -1 && ref == null; i--) ref = yawAt(i);
+    let any = false;
+    for (let i = s.from; i < s.to; i++) { const y = yawAt(i); if (y == null) continue; any = true; let d = Math.abs(y - ref) % 360; if (d > 180) d = 360 - d; if (d > 60) return true; }
+    return any ? false : null;
+  };
+  const backSegs = segs.filter(s => s.slots.length === 1 && s.slots[0] >= 2);
+  const backRot = backSegs.map(segRot);
+  if (backSegs.length && (rec.gyro || rec.backMode)) html += '<p class="hint" style="margin-top:10px">' + (rec.gyro
+    ? 'Back-slot pairs: ' + backRot.filter(x => x === false).length + ' of ' + backSegs.length + ' put in without rotating.'
+    : 'Back-slot pairs: ' + backSegs.length + '. Rotation check needs a cube with a gyroscope.') + '</p>';
   html += '<div class="pairs">';
   const adv = showAdv;
   // What a move count means depends on the mode: optimal solutions, or the alg from your list
@@ -2052,7 +2139,7 @@ function renderAnalysis(rec, A){
         '<p class="hint" style="margin:0">' + (s.slots.includes(o.slot) ? 'The pair you solved' : 'Instead of ' + E.SLOT_NAMES[s.slots[0]] + ', you could have solved') + ' <span class="slot">' + slotLabel(o.slot) + '</span> from this position:</p>' +
         '<div class="algs">' + algRows(o) + '</div></div>').join('');
     html += '<article class="pair">' +
-      '<div class="pair-head"><h3>Pair ' + (idx + 1) + ' <span class="slot done">' + name + '</span>' + (s.multi ? '<span class="pill good">multislot</span>' : '') + (fcase ? '<button class="mini" data-drill="f2l-' + fcase.n + '" title="Drill this case in F2L cards">F2L ' + fcase.n + ' · drill</button>' : '') + '</h3>' +
+      '<div class="pair-head"><h3>Pair ' + (idx + 1) + ' <span class="slot done">' + name + '</span>' + (s.multi ? '<span class="pill good">multislot</span>' : '') + (s.slots.length === 1 && s.slots[0] >= 2 && segRot(s) != null ? (segRot(s) ? '<span class="pill warn">rotated</span>' : '<span class="pill good">no rotation</span>') : '') + (fcase ? '<button class="mini" data-drill="f2l-' + fcase.n + '" title="Drill this case in F2L cards">F2L ' + fcase.n + ' · drill</button>' : '') + '</h3>' +
       '<span class="times">look ' + fmt(s.recog) + ' · turn ' + fmt(s.exec) + (s.maxPause > 400 ? ' · longest pause ' + fmt(s.maxPause) : '') + '</span></div>' +
       '<div class="algs">' +
         '<span class="lbl">You</span><code>' + esc(s.user.text) + '</code><span class="n">' + s.userHTM + ' ' + deltaPill(d, adv) + '</span>' +
@@ -2170,7 +2257,7 @@ async function openConn(device){
     // A wrong MAC connects fine but nothing can be decoded: check that a readable state arrives.
     macConfirmed = false; clearTimeout(macTimer);
     macTimer = setTimeout(() => checkMac(c, 1), 3000);
-    needInitialSync = true;
+    needInitialSync = true; lastMoveSerial = null; syncRetries = 0; clearTimeout(syncRetryT);
     await c.sendCubeCommand({ type: 'REQUEST_HARDWARE' });
     await c.sendCubeCommand({ type: 'REQUEST_FACELETS' });
     await c.sendCubeCommand({ type: 'REQUEST_BATTERY' });
@@ -2251,19 +2338,67 @@ function setConn(on){
   if (on && activeTab === 'rxd' && rd.phase === 'nocube' && rd.target) setTimeout(rdArm, 0);
   $('connText').textContent = on ? ((hwName || conn.deviceName) + (battery != null ? ' · ' + battery + '%' : '')) : reconn ? 'Cube asleep or out of range. Reconnecting: turn a face to wake it…' : 'No cube connected';
 }
+// Every turn and every state report from the cube carries the cube's move counter (serial).
+// A dropped turn is usually not lost: the cube library re-sends it later (with the next turn on
+// older GAN cubes, or by asking the cube for its move history on newer ones). So a state report
+// that is ahead of the last turn we applied means turns are still on their way, not missed.
+let lastMoveSerial = null, syncRetries = 0, syncRetryT = 0;
+const serialGap = (a, b) => (a - b) & 255; // how far serial a is after b
+function requestSync(){ if (!conn) return; syncRequestAt = moveCounter; conn.sendCubeCommand({ type: 'REQUEST_FACELETS' }).catch(() => {}); }
+// Find the 1 or 2 quarter turns that take our tracked state to the cube's, and apply them as if
+// they had arrived (their times are unknown, so they count as happening now).
+function fillMissing(fl, fs){
+  let st; try { st = faceletsToUser(fl); } catch (e) { return false; }
+  const n = serialGap(fs, lastMoveSerial), Q = [];
+  for (const f of 'URFDLB') for (const a of [1, 3]) Q.push([f, a]);
+  const mv = ([f, a]) => FACES.indexOf(f) * 3 + (a === 1 ? 0 : 2);
+  let found = null;
+  for (const q1 of Q) {
+    const s1 = E.applyMove(cur, mv(q1));
+    if (n === 1) { if (E.equal(s1, st)) { found = [q1]; break; } continue; }
+    for (const q2 of Q) if (E.equal(E.applyMove(s1, mv(q2)), st)) { found = [q1, q2]; break; }
+    if (found) break;
+  }
+  if (!found) return false;
+  syncRequestAt = -1;
+  for (const [f, a] of found) { lastMoveSerial = (lastMoveSerial + 1) & 255; handleTurn(f, a, { localTimestamp: performance.now(), cubeTimestamp: null, recovered: true }); }
+  return true;
+}
 function onCubeEvent(ev){
   if (ev.type === 'MOVE') {
     const face = CUBE_TO_USER[settings.cross][ev.move[0]];
     if (!macConfirmed) return;
+    let gap = 1;
+    if (ev.serial != null) {
+      const sr = ev.serial & 255;
+      if (lastMoveSerial != null) {
+        gap = serialGap(sr, lastMoveSerial);
+        if (gap === 0 || gap > 128) return; // already counted (arrived late, after a re-sync from the cube's state)
+      }
+      lastMoveSerial = sr;
+    }
+    clearTimeout(syncRetryT); syncRetries = 0;
     handleTurn(face, ev.move.indexOf("'") >= 0 ? 3 : 1, ev);
-    scheduleIdleSync();
+    if (gap > 1) { clearTimeout(idleSyncT); requestSync(); } // turns lost for good: get the real state now
+    else scheduleIdleSync();
   } else if (ev.type === 'FACELETS') {
     if (!validFacelets(ev)) return;
     macConfirmed = true;
     if (!solverReady) return;
     if (!needInitialSync && syncRequestAt !== moveCounter) return; // stale answer
+    const fs = ev.serial != null ? ev.serial & 255 : null;
+    if (!needInitialSync && fs != null && lastMoveSerial != null && fs !== lastMoveSerial && serialGap(fs, lastMoveSerial) < 128 && syncRetries < 6) {
+      // the cube has done turns we have not received yet: give the library a moment to deliver them;
+      // if they still have not come and only 1 or 2 are missing, work out which ones from the state
+      if (syncRetries >= 1 && serialGap(fs, lastMoveSerial) <= 2 && fillMissing(ev.facelets, fs)) { syncRetries = 0; return; }
+      syncRetries++; clearTimeout(syncRetryT);
+      syncRetryT = setTimeout(requestSync, 1000);
+      return;
+    }
+    syncRetries = 0;
     let st; try { st = faceletsToUser(ev.facelets); } catch (e) { return; }
     const initial = needInitialSync; needInitialSync = false; syncRequestAt = -1;
+    if (fs != null) lastMoveSerial = fs; // the state now includes every turn up to here
     if (!E.equal(st, cur)) {
       cur = st;
       if (!initial) toast('Some turns were missed over Bluetooth. Re-synced from the cube.');
@@ -2461,13 +2596,18 @@ function pickNext(){
 
 // --- presenting a card ---
 const U_TURNS = [[], [0], [1], [2]];
+function f2lCardSlots(){ const v = settings.f2lCardSlot || 'any'; return v === 'any' ? [0, 1, 2, 3] : v === 'back' ? [2, 3] : [+v]; }
+function f2lCardNoRot(){ return settings.backSlot === 'norot' || (settings.f2lCardSlot || 'any') !== 'any'; }
 function randomLLState(card){
   if (card.set === 'F2L') {
     const lls = LLCARDS.filter(c => c.set === 'OLL');
     let s = cardCase(lls[Math.floor(Math.random() * lls.length)]);
     const plls = LLCARDS.filter(c => c.set === 'PLL');
     s = E.applyMoves(s, E.invertMoves(E.parseAlg(plls[Math.floor(Math.random() * plls.length)].alg).moves));
-    const k = Math.floor(Math.random() * 4);
+    // which slot the case lands in for each y rotation of the alg; keep the ones the slot picker allows
+    const okSlots = f2lCardSlots();
+    const ks = [0, 1, 2, 3].filter(k => { const p0 = E.parseAlg(['', 'y ', 'y2 ', "y' "][k] + cardAlg(card)); if (!p0) return false; const t0 = E.applyMoves(E.solved(), E.invertMoves(p0.moves)); return okSlots.includes([0, 1, 2, 3].find(j => !E.slotSolved(t0, j))); });
+    const k = ks.length ? ks[Math.floor(Math.random() * ks.length)] : Math.floor(Math.random() * 4);
     const p = E.parseAlg(['', 'y ', 'y2 ', "y' "][k] + cardAlg(card));
     s = E.applyMoves(s, E.invertMoves(p.moves));
     return E.applyMoves(s, U_TURNS[Math.floor(Math.random() * 4)]);
@@ -2508,7 +2648,7 @@ function presentCard(card, opts){
   renderLL(); renderDeck();
 }
 function llStart(){
-  ll.phase = 'running'; ll.t0 = performance.now();
+  ll.phase = 'running'; ll.t0 = performance.now(); yawBase();
   buildAlgPaths();
   const loop = () => { const el = $('llTimer'); if (el && ll.phase === 'running') { el.textContent = fmt(performance.now() - ll.t0); requestAnimationFrame(loop); } };
   requestAnimationFrame(loop);
@@ -2559,7 +2699,7 @@ function buildF2LPaths(start){
   if (slot == null) { ll.follow = null; ll.off = []; return; }
   ll.f2lSlot = slot;
   const keep = [0, 1, 2, 3].filter(j => j !== slot);
-  const best = E.matchAlg(algLib, start, slot, keep, false);
+  const best = E.matchAlg(algLib, start, slot, keep, false, f2lCardNoRot());
   const seen = new Set();
   const add = (c) => {
     const key = c.moves.join(','); if (seen.has(key)) return;
@@ -2758,7 +2898,8 @@ function llFinish(ok){
   const pathHtm = ll.follow ? E.mergeQuarterTurns(ll.follow.path.parsed.moves).length : null;
   learnOwnWay(c, ok, htm);
   ll.lastDone = ok ? lastSolveText() : null;
-  const r = { ok, errs: (ll.errs || 0) + (ll.hinted ? 1 : 0), hinted: !!ll.hinted, extraT: pathHtm != null ? htm - pathHtm : 0, t: Math.max(0, t), recog, exec: recog != null ? t - recog : null, htm, revealed: ll.revealed };
+  const r = { ok, errs: (ll.errs || 0) + (ll.hinted ? 1 : 0), hinted: !!ll.hinted, extraT: pathHtm != null ? htm - pathHtm : 0, t: Math.max(0, t), recog, exec: recog != null ? t - recog : null, htm, revealed: ll.revealed,
+    rot: c.set === 'F2L' && ll.f2lSlot >= 2 && ll.mode !== 'virtual' ? yawState.rotated : null };
   if (ll.drill) { setDrillFinish(r); return; }
   if (ll.learnFlow) { learnFinish(r); return; }
   ll.phase = 'done';
@@ -2952,9 +3093,30 @@ function applyOrientation(){
   }
   $('cube3d').style.transform = qToMatrix3d(q);
 }
+// Did the cube get rotated (y, y2, y') since a starting moment? Only cubes with a gyroscope tell us.
+// Yaw is the turn about the cube's own U-D axis since yawBase(); samples where the cube is tipped
+// far over (to look at the back) are skipped. More than 60 degrees counts as a rotation.
+const yawState = { q0: null, yaw: null, rotated: null };
+function qrot(q, v){ const p = qmul(qmul(q, { x: v[0], y: v[1], z: v[2], w: 0 }), qconj(q)); return [p.x, p.y, p.z]; }
+function yawBase(){ yawState.q0 = gyroQ ? Object.assign({}, gyroQ) : null; yawState.yaw = gyroQ ? 0 : null; yawState.rotated = gyroQ ? false : null; }
+function yawUpdate(){
+  if (!gyroQ) return;
+  if (!yawState.q0) { yawBase(); return; }
+  const d = qmul(qconj(yawState.q0), gyroQ);
+  const up = qrot(d, [0, 1, 0]); if (up[1] < 0.6) return;
+  const f = qrot(d, [0, 0, 1]);
+  yawState.yaw = Math.atan2(f[0], f[2]) * 180 / Math.PI;
+  if (Math.abs(yawState.yaw) > 60) yawState.rotated = true;
+}
+function cardRotHtml(r){
+  if (!r || !ll.card || ll.card.set !== 'F2L' || ll.f2lSlot == null || ll.f2lSlot < 2) return '';
+  if (r.rot == null) return ll.mode === 'virtual' ? '' : '<p class="hint">Rotation check needs a cube with a gyroscope.</p>';
+  return '<p class="hint">' + (r.rot ? '<span class="pill warn">rotated</span> You turned the cube. Try it from the back with the alg shown.' : '<span class="pill good">no rotation</span> Inserted from the back.') + '</p>';
+}
 function onGyro(qraw){
   const n = Math.hypot(qraw.x, qraw.y, qraw.z, qraw.w) || 1;
   gyroQ = { x: qraw.x / n, y: qraw.z / n, z: -qraw.y / n, w: qraw.w / n };
+  yawUpdate();
   if (!gyroSeen) { gyroSeen = true; $('gyroHint').textContent = 'Gyro connected. Hold white on the bottom and green in front, then press Reset view.'; }
   if ((activeTab === 'll' || activeTab === 'f2lc') && ll.mode === 'virtual' && !gyroRaf) gyroRaf = requestAnimationFrame(() => { gyroRaf = 0; applyOrientation(); });
 }
@@ -2986,7 +3148,7 @@ function renderLL(){
   else html += '<div class="learnbar"><span class="hint">Want to drill this one?</span><button class="mini" data-learn="practice">Practise it (alg shown)</button><button class="mini primary" data-learn="test">Test me</button></div>';
   if (ll.phase === 'between') {
     const r = ll.lastRep;
-    html += '<div class="timer ready">' + (r ? fmt(r.t) : '') + '</div><p class="hint">' + (ll.drill ? 'Next one…' : ll.test ? (r && r.ok && !r.revealed ? 'Correct. Next one…' : '') : 'Again…') + '</p>';
+    html += '<div class="timer ready">' + (r ? fmt(r.t) : '') + '</div><p class="hint">' + (ll.drill ? 'Next one…' : ll.test ? (r && r.ok && !r.revealed ? 'Correct. Next one…' : '') : 'Again…') + '</p>' + cardRotHtml(r);
   } else if (ll.phase === 'scrambling') {
     const toks = ll.rem.map((r, i) => '<span class="tok' + (i === 0 ? ' next' : '') + (r.fix ? ' fix' : '') + (r.partial && i === 0 ? ' part' : '') + '">' + tokText(r) + '</span>').join('');
     html += '<p class="eyebrow">Scramble · ' + ll.rem.length + ' to go</p><div class="scr">' + toks + '</div><p class="hint">The timer starts as soon as the scramble is done.' + (ll.learning ? '' : ' The case stays hidden until you have solved it.') + '</p>';
@@ -3001,7 +3163,7 @@ function renderLL(){
     const mr = mistakeRate(c), slow = slowness(c);
     html += '<p class="hint">' + (r.errs ? r.errs + ' slip' + (r.errs > 1 ? 's' : '') + ' off the alg this time. ' : r.extraT > 2 ? r.extraT + ' extra turns this time. ' : r.ok && !r.revealed ? 'Clean. ' : '') +
       'This card: ' + (slow > 1.25 ? 'slower than' : slow < 0.85 ? 'faster than' : 'about as fast as') + ' your other cards' + (mr != null ? ', slips in ' + Math.round(mr * 100) + '% of the last attempts' : '') + '. Weaker cards come up more often; nothing to grade.</p>';
-    html += '<p class="hint">Press Next card or the space bar to continue.</p>' + algEditHtml(c);
+    html += cardRotHtml(r) + '<p class="hint">Press Next card or the space bar to continue.</p>' + algEditHtml(c);
   }
   box.innerHTML = html;
   const gu = $('llGiveUp'); if (gu) gu.onclick = llGiveUp;
@@ -3019,6 +3181,7 @@ function renderDeck(){
   let cards = LLCARDS.filter(inSets);
   const isF2L = ll.tabSet === 'F2L';
   $('deckSortRow').hidden = !isF2L;
+  $('f2lSlotRow').hidden = !isF2L; $('f2lSlotSel').value = settings.f2lCardSlot || 'any';
   if (isF2L) {
     const order = settings.f2lSort || 'worst';
     $('deckSort').value = order;
@@ -5130,6 +5293,11 @@ $('setThr').onchange = () => { settings.threshold = +$('setThr').value; store.se
 function renderMacHint(){ const n = Object.keys(store.get('macs', {})).length; $('macHint').textContent = n ? n + ' cube' + (n > 1 ? 's' : '') + ' remembered' : 'None saved'; }
 renderMacHint();
 $('btnForgetMac').onclick = () => { store.set('macs', {}); renderMacHint(); toast('Saved MAC addresses cleared. Next connect will look it up again.'); };
+$('setBackSlot').value = settings.backSlot === 'norot' ? 'norot' : 'rot';
+$('setBackSlot').onchange = () => { settings.backSlot = $('setBackSlot').value; store.set('settings', settings); algLib.noRotBack = settings.backSlot === 'norot'; setAdvAlgs(showAdvAlgs); };
+$('setF2LScr').value = settings.f2lScr === 'back' ? 'back' : 'random';
+$('setF2LScr').onchange = () => { settings.f2lScr = $('setF2LScr').value; store.set('settings', settings); if (activeTab === 'f2l' && (phase === 'scrambling' || phase === 'ready')) newScramble(); };
+$('f2lSlotSel').onchange = () => { settings.f2lCardSlot = $('f2lSlotSel').value; store.set('settings', settings); if (ll.tabSet === 'F2L' && ll.card && (ll.phase === 'scrambling' || ll.phase === 'idle' || ll.phase === 'done')) presentCard(ll.card, { learnFlow: ll.learnFlow, test: ll.test }); };
 $('setAdvAlgs').value = settings.alwaysAdvAlgs ? '1' : '0';
 $('setAdvAlgs').onchange = () => { settings.alwaysAdvAlgs = $('setAdvAlgs').value === '1'; store.set('settings', settings); setAdvAlgs(settings.alwaysAdvAlgs); };
 function setAdvAlgs(on){
