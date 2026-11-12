@@ -1274,8 +1274,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = api; else 
 
   // ----- corner cases (2-look CMLL) -----
   const OC_ALGS = [
-    ['Sune', "R U R' U R U2 R'"], ['Antisune', "R U2 R' U' R U' R'"], ['H', "R U2 R' U' R U R' U' R U' R'"], ['Pi', "R U2 R2 U' R2 U' R2 U2 R"],
-    ['U (headlights)', "R2 D' R U2 R' D R U2 R"], ['T (chameleon)', "r U R' U' r' F R F'"], ['L (bowtie)', "F' r U R' U' r' F R"],
+    // Roux 2-look versions (rouxvolution.pages.dev, scheopner.com/cube/cmll.php): shorter than the
+    // CFOP OLL algs because the top edges are free to move
+    ['Sune', "R U R' U R U2 R'"], ['Antisune', "R' U' R U' R' U2 R"], ['H', "F R U R' U' R U R' U' R U R' U' F'"], ['Pi', "F R U R' U' R U R' U' F'"],
+    ['U (headlights)', "F R U R' U' F'"], ['T (chameleon)', "R U R' U' R' F R F'"], ['L (bowtie)', "F R' F' R U R U' R'"],
   ];
   const PERM_ALGS = [['Adjacent swap', "R U R' F' R U R' U' R' F R2 U' R'"], ['Diagonal swap', "F R U' R' U' R U R' F' R U R' U' R' F R F'"]];
   const coKey = (s) => { let b = null, t = s; for (let u = 0; u < 4; u++) { const k = t.co.slice(0, 4).join(''); if (b === null || k < b) b = k; t = E.applyMove(t, 0); } return b; };
@@ -5161,7 +5163,7 @@ function rdRefHtml(){
   if (rd.kind !== 'cmll') return '';
   const pic = (alg) => { try { return caseSVG(ROUX.caseState(alg), 'OLL', 52); } catch (e) { return ''; } };
   const row = ([n, a]) => '<div class="llcard" style="gap:10px;padding:4px 0">' + pic(a) + '<div><b>' + esc(n) + '</b><br><code>' + esc(a) + '</code></div></div>';
-  return '<details style="margin-top:10px"><summary>2-look corner algs (9 in total)</summary><p class="hint">First twist the corners so the top colour faces up (7 cases). Then swap them if needed (2 cases). You already know most of these from OLL and PLL; in Roux they are allowed to mess up the edges.</p>' +
+  return '<details style="margin-top:10px"><summary>2-look corner algs (9 in total)</summary><p class="hint">First twist the corners so the top colour faces up (7 cases). Then swap them if needed (2 cases). These are the Roux versions: the top edges are free to move, so most are shorter than the CFOP OLL algs. The two swaps are the usual J and Y perms.</p>' +
     '<p class="eyebrow" style="margin:6px 0 2px">1. Orient</p>' + ROUX.OC_ALGS.map(row).join('') + '<p class="eyebrow" style="margin:6px 0 2px">2. Permute</p>' + ROUX.PERM_ALGS.map(([n, a]) => '<div style="padding:4px 0"><b>' + esc(n) + '</b><br><code>' + esc(a) + '</code></div>').join('') + '</details>';
 }
 const RD_HINT = {
