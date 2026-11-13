@@ -1567,11 +1567,14 @@ if (typeof module !== 'undefined' && module.exports) module.exports = api; else 
     }
     return { s, k };
   }
+  // CMLL drills: turn the M slice back so the centres line up with the blocks (white bottom,
+  // CMLL on top, however you hold it); the M-slice edges stay scrambled.
+  function alignM(x) { const q = (4 - x.k) & 3; return { s: q ? E.applyMoves(x.s, [mv(1, q), mv(4, 4 - q)]) : x.s, k: 0 }; }
   function lseCase(rng) { rng = rng || Math.random; for (;;) { const x = lseScramble(E.solved(), 24, rng); if (!E.equal(x.s, E.solved())) return x.s; } }
   function cmllCase(rng) {
     rng = rng || Math.random;
     for (;;) {
-      let { s, k } = lseScramble(E.solved(), 24, rng);
+      let { s, k } = alignM(lseScramble(E.solved(), 24, rng));
       const auf = () => { const q = Math.floor(rng() * 4); if (q) s = E.applyMove(s, mv(TOPF[k], q)); };
       const undo = (alg) => { s = E.applyMoves(s, E.invertMoves(E.parseAlg(alg, frameFor(k)).moves)); };
       const p = Math.floor(rng() * 3); if (p) { auf(); undo(PERM_ALGS[p - 1][1]); }
@@ -1591,7 +1594,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = api; else 
     rng = rng || Math.random;
     const alg = (kind === 'oc' ? OC_ALGS : PERM_ALGS).find(x => x[0] === name)[1];
     for (let tries = 0; tries < 200; tries++) {
-      let { s, k } = lseScramble(E.solved(), 24, rng);
+      let { s, k } = alignM(lseScramble(E.solved(), 24, rng));
       const auf = () => { const q = Math.floor(rng() * 4); if (q) s = E.applyMove(s, mv(TOPF[k], q)); };
       const undo = (a) => { s = E.applyMoves(s, E.invertMoves(E.parseAlg(a, frameFor(k)).moves)); };
       if (kind === 'oc') { const p = Math.floor(rng() * 3); if (p) { auf(); undo(PERM_ALGS[p - 1][1]); } }
