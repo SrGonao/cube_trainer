@@ -1780,6 +1780,23 @@ function pathIndex(start, ms){
     st = E.applyMove(st, m);
     idx.set(stateKey(st), { i: n + 1, acc: 0 });
   });
+  // A slice or wide turn arrives from the cube as two face turns on opposite faces (M = R L'),
+  // in either order and possibly one quarter at a time: index every halfway state of such a pair
+  // so the first half doesn't count as leaving the alg.
+  let s0 = start;
+  ms.forEach((m, n) => {
+    const m2 = ms[n + 1], f = (m / 3) | 0;
+    if (m2 != null && ((m2 / 3) | 0) % 3 === f % 3 && ((m2 / 3) | 0) !== f) {
+      const g = (m2 / 3) | 0, opts = (x) => (x % 3 === 1 ? [0, 1, 2, 3] : [0, [1, 2, 3][x % 3]]);
+      for (const a of opts(m)) for (const b of opts(m2)) {
+        let s = s0;
+        for (let k = 0; k < a; k++) s = E.applyMove(s, f * 3);
+        for (let k = 0; k < b; k++) s = E.applyMove(s, g * 3);
+        const key = stateKey(s); if (!idx.has(key)) idx.set(key, { i: n, acc: 1 });
+      }
+    }
+    s0 = E.applyMove(s0, m);
+  });
   return idx;
 }
 function onPracticeTurn(m, f, b){
