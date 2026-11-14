@@ -1692,10 +1692,33 @@ if (typeof module !== 'undefined' && module.exports) module.exports = api; else 
     }
     return null;
   }
+  // Full (one-look) CMLL: a case set up by undoing its alg, with the M slice lined up afterwards
+  // (some algs use r, which leaves the centres turned) and random AUFs.
+  function cmllCaseFromAlg(alg, rng) {
+    rng = rng || Math.random;
+    const p = E.parseAlg(alg); if (!p) return null;
+    for (let tries = 0; tries < 50; tries++) {
+      let { s } = alignM(lseScramble(E.solved(), 24, rng));
+      const auf = () => { const q = Math.floor(rng() * 4); if (q) s = E.applyMove(s, mv(0, q)); };
+      auf(); s = E.applyMoves(s, E.invertMoves(p.moves));
+      for (let q = 0; q < 4 && pairN(s) !== 0; q++) s = E.applyMoves(s, [mv(1, 1), mv(4, 3)]);
+      if (pairN(s) !== 0) continue;
+      auf();
+      return s;
+    }
+    return null;
+  }
+  // which corner case a state is, the same whatever the U turns before and after
+  function cmllKey(c) {
+    const n = pairN(c); if (n < 0) return null;
+    const N = norm(c, n); let b = null;
+    for (let a = 0; a < 4; a++) for (let d = 0; d < 4; d++) { const x = E.applyMoves(E.mult(E.applyMoves(E.solved(), UN[a]), N), UN[d]); const k = x.cp.slice(0, 4).join('') + x.co.slice(0, 4).join(''); if (b === null || k < b) b = k; }
+    return b;
+  }
   function cornersOriented(c) { const n = pairN(c); return n >= 0 && coDone(norm(c, n)); }
 
   const api = { ROTS, FMAP, conj, unconj, rotFor, rotFaces, fbN, sbN, pairN, norm, cornersAUF, stageDone, ocName, permName, OC_ALGS, PERM_ALGS, caseState,
-    stm, describe, fmFor, split, fbBuild, fbReady: () => !!FBT, fbDist, fbSolutions, fbdrDone, fbdrDist, fbdrSolutions, lpCase, randomState, lseScramble, lseCase, cmllCase, frameFor, cmllCaseFor, cornersOriented, sbBuild, sbReady: () => !!SBT, sbDist, sbSolutions, sbSquareDone, sbCase };
+    stm, describe, fmFor, split, fbBuild, fbReady: () => !!FBT, fbDist, fbSolutions, fbdrDone, fbdrDist, fbdrSolutions, lpCase, randomState, lseScramble, lseCase, cmllCase, frameFor, cmllCaseFor, cmllCaseFromAlg, cmllKey, cornersOriented, sbBuild, sbReady: () => !!SBT, sbDist, sbSolutions, sbSquareDone, sbCase };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.ROUX = api;
 })(typeof self !== 'undefined' ? self : this);
 </script>
@@ -2722,6 +2745,58 @@ const CMLL_FREQ = { Sune: 4 / 27, Antisune: 4 / 27, H: 2 / 27, Pi: 4 / 27, 'U (h
 const cmSlug = (n) => n.replace(/\W+/g, '-').replace(/-$/, '');
 for (const [n, a] of ROUX.OC_ALGS) LLCARDS.push({ id: 'cmll-oc-' + cmSlug(n), set: 'CMLL', w: 'oc', key: n, name: n, nick: 'twist the corners', alg: a, group: 'Step 1: orient the corners' });
 for (const [n, a] of ROUX.PERM_ALGS) LLCARDS.push({ id: 'cmll-cp-' + cmSlug(n), set: 'CMLL', w: 'cp', key: n, name: n, nick: 'swap the corners', alg: a, group: 'Step 2: permute the corners' });
+// Full CMLL (one look): Scheopner's list (scheopner.com/cube/cmll.php), checked to keep both blocks and to
+// cover every case. The O cases are the two swap cards above.
+const CMLL_FULL = [
+    ["H", "Columns", "R U2 R' U' R U R' U' R U' R'"],
+    ["H", "Single Column", "U F R U' R' U R U2 R' U' R U R' U' F'"],
+    ["H", "Single Row", "r U' r2 D' r U' r' D r2 U r'"],
+    ["H", "Rows", "F R U R' U' R U R' U' R U R' U' F'"],
+    ["Pi", "Back Row", "U F R U R' U' R U R' U' F'"],
+    ["Pi", "Rows", "r U' r2 D' r U r' D r2 U r'"],
+    ["Pi", "Up Slash", "U2 F R' F' R U2 R U' R' U R U2 R'"],
+    ["Pi", "X Checkerboard", "R' F R U F U' R U R' U' F'"],
+    ["Pi", "Down Slash", "U R U2 R' U' R U R' U2 R' F R F'"],
+    ["Pi", "Front Row", "R' U' R' F R F' R U' R' U2 R"],
+    ["U", "Columns", "R2 F U' F U F2 R2 U' R' F R"],
+    ["U", "Front Row", "U2 r U' r' U r' D' r U' r' D r"],
+    ["U", "Right Column", "R2 D' R U2 R' D R U2 R"],
+    ["U", "Back Row", "U' F R2 D R' U R D' R2 U' F'"],
+    ["U", "Left Column", "U2 R2 D R' U2 R D' R' U2 R'"],
+    ["U", "Rows", "U' F R U R' U' F'"],
+    ["T", "Back Row", "F R' F R2 U' R' U' R U R' F2"],
+    ["T", "Rows", "r' D' r U r' D r U' r U r'"],
+    ["T", "Up Slash", "U' R U R' U' R' F R F'"],
+    ["T", "X Checkerboard", "r' U r U2 R2 F R F' R"],
+    ["T", "Down Slash", "U L' U' L U L F' L' F"],
+    ["T", "Front Row", "U2 r2 D' r U r' D r2 U' r' U' r"],
+    ["S", "Left Column", "R U R' U R U2 R'"],
+    ["S", "Down Slash", "R U R' U' R' F R F' R U R' U R U2 R'"],
+    ["S", "X Checkerboard", "R U' L' U R' U' L"],
+    ["S", "Up Slash", "L' U2 L U2 L F' L' F"],
+    ["S", "Columns", "F R' F' R U2 R U2 R'"],
+    ["S", "Right Column", "U2 R U R' U R' F R F' R U2 R'"],
+    ["AS", "Right Column", "U2 R' U' R U' R' U2 R"],
+    ["AS", "Up Slash", "R2 D R' U R D' R' U R' U' R U' R'"],
+    ["AS", "Columns", "F' L F L' U2 L' U2 L"],
+    ["AS", "Down Slash", "R U2 R' U2 R' F R F'"],
+    ["AS", "X Checkerboard", "L' U R U' L U R'"],
+    ["AS", "Left Column", "U R' U' R U' R' U R' F R F' U R"],
+    ["L", "Adj Row", "U2 R U2 R' U' R U R' U' R U R' U' R U' R'"],
+    ["L", "Opp Row", "F R U' R' U' R U R' F'"],
+    ["L", "Opp / Slash", "U' R' U2 R' D' R U2 R' D R2"],
+    ["L", "Adj / Slash", "R U2 R D R' U2 R D' R2"],
+    ["L", "Opp Column", "F R' F' R U R U' R'"],
+    ["L", "Adj Column", "R U2 R2 F R F' R U2 R'"]
+];
+const CM_SET_NAMES = { S: 'Sune', AS: 'Antisune', H: 'H', Pi: 'Pi', U: 'U', T: 'T', L: 'L' };
+for (const [set, n, a] of CMLL_FULL) LLCARDS.push({ id: 'cmll-f-' + cmSlug(set + '-' + n), set: 'CMLL', w: 'full', key: set + ' ' + n, name: CM_SET_NAMES[set] + ': ' + n, nick: 'one look', alg: a, group: 'Full CMLL: ' + CM_SET_NAMES[set] + ' cases' });
+function cmCaseBlock(c){ return c.w === 'full' ? ROUX.cmllCaseFromAlg(c.alg) : ROUX.cmllCaseFor(c.w, c.key); }
+let CM_KEYS = null;
+function cmFullCardFor(blockState){
+  if (!CM_KEYS) { CM_KEYS = new Map(); for (const c of LLCARDS) if (c.set === 'CMLL' && c.w === 'full') { const p = E.parseAlg(c.alg); CM_KEYS.set(ROUX.cmllKey(E.applyMoves(E.solved(), E.invertMoves(p.moves))), c); } }
+  return CM_KEYS.get(ROUX.cmllKey(blockState)) || null;
+}
 function cardSvgSet(c){ return c.set === 'CMLL' ? (c.w === 'oc' ? 'CO' : 'CP') : c.set; }
 // cube turns <-> turns as written for the Roux hold (k = how far the M slice is turned)
 function cmToCur(mb){ return ROUX.FMAP[rdRot()].indexOf((mb / 3) | 0) * 3 + mb % 3; }
@@ -2863,7 +2938,7 @@ const U_TURNS = [[], [0], [1], [2]];
 function f2lCardSlots(){ const v = settings.f2lCardSlot || 'any'; return v === 'any' ? [0, 1, 2, 3] : v === 'back' ? [2, 3] : [+v]; }
 function f2lCardNoRot(){ return settings.backSlot === 'norot' || (settings.f2lCardSlot || 'any') !== 'any'; }
 function randomLLState(card){
-  if (card.set === 'CMLL') { const b = ROUX.cmllCaseFor(card.w, card.key); return ROUX.unconj(b || ROUX.cmllCase(), rdRot()); }
+  if (card.set === 'CMLL') { const b = cmCaseBlock(card); return ROUX.unconj(b || ROUX.cmllCase(), rdRot()); }
   if (card.set === 'F2L') {
     const lls = LLCARDS.filter(c => c.set === 'OLL');
     let s = cardCase(lls[Math.floor(Math.random() * lls.length)]);
@@ -3423,7 +3498,7 @@ function renderLL(){
   if (!c) {
     const anyKnown = LLCARDS.some(x => inSetsTab(x) && stat(x.id).known);
     const f2 = ll.tabSet === 'F2L';
-    if (ll.tabSet === 'CMLL') { box.innerHTML = '<p class="eyebrow">2-look CMLL cards</p><p class="phase-title">' + (anyKnown ? 'Press Next card to start' : 'Press New card to learn your first one') + '</p>' + blockSelectHtml('cmBlock') + '<p class="hint">Step 1 twists the four top corners so the top colour faces up; step 2 swaps them. New card starts with the most common case; the cards work like the OLL and PLL ones (practise, test, drill a set, your own algs).</p>'; return; }
+    if (ll.tabSet === 'CMLL') { box.innerHTML = '<p class="eyebrow">2-look CMLL cards</p><p class="phase-title">' + (anyKnown ? 'Press Next card to start' : 'Press New card to learn your first one') + '</p>' + blockSelectHtml('cmBlock') + '<p class="hint">2-look first: step 1 twists the four top corners so the top colour faces up, step 2 swaps them. After those, New card moves on to full (one-look) CMLL, 40 more cases grouped by corner shape (Sune, Antisune, Pi, H, U, T, L), most common first. Tick groups under New card pool to learn one shape at a time. The cards work like the OLL and PLL ones (practise, test, drill a set, your own algs).</p>'; return; }
     box.innerHTML = '<p class="eyebrow">' + (f2 ? 'F2L cards' : 'OLL & PLL cards') + '</p><p class="phase-title">' + (anyKnown ? 'Press Next card to start' : f2 ? 'Click a case to drill it' : 'Tick the cases you already know') + '</p>' +
       '<p class="hint">' + (f2 ? 'Every pair you solve in the F2L tab and the Timer is recorded here by case. The list is sorted by where you lose the most moves against the alg. Click a case to get a scramble with the other three pairs solved and that case set up in a random slot. Tick the ones you know to include them in Next card.' : anyKnown ? 'You can also click any case in the list to practise it.' : 'Use the list on the right, or press New card to learn one. Next card only shows cases you\'ve ticked.') + '</p>';
     return;
@@ -3545,7 +3620,7 @@ function saveCardAlg(c, text){
   if (c.set === 'CMLL') {
     if (!E.parseAlg(t) || !E.parseAlg(t).moves.length) return 'Can\'t read that alg.';
     for (let i = 0; i < 8; i++) {
-      const b = ROUX.cmllCaseFor(c.w, c.key); if (!b) continue;
+      const b = cmCaseBlock(c); if (!b) continue;
       if (!['', 'U ', 'U2 ', "U' "].some(a => { const pr = E.parseAlg(a + t); return pr && cmDoneBlock(c, E.applyMoves(b, pr.moves)); })) return 'That alg doesn\'t solve ' + c.name + ' with the blocks kept (written with the first block on the bottom left).';
     }
     stat(c.id).alg = (t === c.alg) ? undefined : t; saveLL(); return null;
@@ -3604,7 +3679,14 @@ function caseFreq(){
   }
   const tot = F2L_IDX.cases.reduce((a, x) => a + x.size, 0);
   for (const c of LLCARDS) if (c.set === 'F2L') CASE_FREQ[c.id] = c.f2l.size / tot;
-  for (const c of LLCARDS) if (c.set === 'CMLL') CASE_FREQ[c.id] = CMLL_FREQ[c.key] || 0;
+  for (const c of LLCARDS) if (c.set === 'CMLL' && c.w !== 'full') CASE_FREQ[c.id] = CMLL_FREQ[c.key] || 0;
+  // one-look cases: share of all 648 top-corner states
+  const perms4 = []; (function gen(a, rest){ if (!rest.length) { perms4.push(a); return; } rest.forEach((v, i) => gen(a.concat(v), rest.filter((_, j) => j !== i))); })([], [0, 1, 2, 3]);
+  for (const pc of perms4) for (let o = 0; o < 27; o++) {
+    const st = E.solved(); let x = o, sum = 0; for (let i = 0; i < 3; i++) { st.co[i] = x % 3; sum += st.co[i]; x = (x / 3) | 0; } st.co[3] = (3 - sum % 3) % 3;
+    for (let i = 0; i < 4; i++) st.cp[i] = pc[i];
+    const c = cmFullCardFor(st); if (c) CASE_FREQ[c.id] = (CASE_FREQ[c.id] || 0) + 1 / 648;
+  }
   return CASE_FREQ;
 }
 function tileTip(c){
@@ -3646,7 +3728,7 @@ function poolCards(){
   let cs = LLCARDS.filter(c => !stat(c.id).known && inSets(c) && (!gs.length || gs.includes(cardGroup(c))));
   const f = caseFreq();
   // 2-look CMLL: learn the twisting step before the swapping step
-  if (P.order === 'freq') cs.sort((a, b) => (a.set === 'CMLL' && b.set === 'CMLL' ? (a.w === 'oc' ? 0 : 1) - (b.w === 'oc' ? 0 : 1) : 0) || (f[b.id] || 0) - (f[a.id] || 0));
+  if (P.order === 'freq') cs.sort((a, b) => (a.set === 'CMLL' && b.set === 'CMLL' ? ({ oc: 0, cp: 1, full: 2 }[a.w]) - ({ oc: 0, cp: 1, full: 2 }[b.w]) : 0) || (f[b.id] || 0) - (f[a.id] || 0));
   else if (P.order === 'mine') cs.sort((a, b) => (a.set === 'F2L' ? ((f2lSeenStats(b) || {}).n || 0) - ((f2lSeenStats(a) || {}).n || 0) : seenInSolves(b) - seenInSolves(a)) || (f[b.id] || 0) - (f[a.id] || 0));
   else if (P.order === 'worst') cs.sort((a, b) => (((f2lSeenStats(b) || {}).extra ?? -9) - ((f2lSeenStats(a) || {}).extra ?? -9)) || (f[b.id] || 0) - (f[a.id] || 0));
   else if (P.order === 'random') cs.sort(() => Math.random() - 0.5);
@@ -3906,6 +3988,12 @@ function recordCMLLFromSolve(rec, sp){
   try { sp = sp || (rec.start && rec.moves ? ROUX.split(rec.start, rec.moves) : null); } catch (e) { return; }
   const cm = sp && sp.steps ? sp.steps.find(x => x.name === 'CMLL') : null; if (!cm) return;
   const parts = cm.sub && cm.sub.length ? cm.sub.map(x => [/^Orient/.test(x.name) ? 'oc' : 'cp', x]) : /swap$/.test(cm.case || '') ? [['cp', cm]] : [];
+  if (!parts.length && /one look/.test(cm.case || '') && rec.start && rec.moves) {
+    let st = rec.start; for (let i = 0; i < sp.iB; i++) st = E.applyMove(st, rec.moves[i][0]);
+    const c = cmFullCardFor(ROUX.conj(st, sp.r));
+    if (c) { const s2 = stat(c.id); s2.solves = s2.solves || []; if (!s2.solves.some(y => y.sid === rec.id)) { s2.solves.push({ sid: rec.id, s: 'full', look: Math.round(cm.look), turn: Math.round(cm.t - cm.look), mv: cm.mv, d: new Date(rec.date).getTime() }); if (s2.solves.length > 40) s2.solves.splice(0, s2.solves.length - 40); } }
+    return;
+  }
   for (const [w, x] of parts) {
     const c = LLCARDS.find(y => y.set === 'CMLL' && y.w === w && y.key.toLowerCase() === String(x.case || '').toLowerCase()); if (!c) continue;
     const st = stat(c.id); st.solves = st.solves || [];
