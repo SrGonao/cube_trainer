@@ -2010,7 +2010,7 @@ function handleTurn(face, amt, raw){
   const prev = cur;
   cur = E.applyMove(cur, m);
   moveCounter++;
-  if (activeTab === 'll' || activeTab === 'f2lc') { llTurn(m, f, amt, raw); renderNet(); renderSlotChips(); return; }
+  if (isLLTab(activeTab)) { llTurn(m, f, amt, raw); renderNet(); renderSlotChips(); return; }
   if (activeTab === 'timer') { timerTurn(m, f, amt, raw); renderNet(); renderSlotChips(); return; }
   if (activeTab === 'tricks') { drillTurn(m, f, amt, raw); renderNet(); renderSlotChips(); return; }
   if (activeTab === 'cross') { crossTurn(m, f, amt, raw); renderNet(); renderSlotChips(); return; }
@@ -2461,7 +2461,7 @@ function onResync(){
     else if (tm.phase === 'inspect') tm.start = E.clone(cur);
     else if (tm.phase === 'running') { tm.lost = true; if (E.equal(cur, E.solved())) tFinish(); }
   }
-  if ((activeTab === 'll' || activeTab === 'f2lc') && ll.mode === 'scramble' && ll.phase === 'scrambling') { ll.rem = pathBetween(cur, ll.target); if (!ll.rem.length) llStart(); renderLL(); }
+  if (isLLTab(activeTab) && ll.mode === 'scramble' && ll.phase === 'scrambling') { ll.rem = pathBetween(cur, ll.target); if (!ll.rem.length) llStart(); renderLL(); }
   if (activeTab === 'roux') {
     if (rx.phase === 'scrambling' || rx.phase === 'nocube') { if (rx.target) { rx.rem = pathBetween(cur, rx.target); if (rx.rem.length) { rx.phase = 'scrambling'; renderRx(); } else rxInspect(); } }
     else if (rx.phase === 'inspect') rx.start = E.clone(cur);
@@ -2628,6 +2628,21 @@ function f2lGroupOf(s){
   return f[FACELET_CORNER[c][0]] === f[FACELET_EDGE[e][0]] ? 'Both on top: U stickers match' : 'Both on top: U stickers differ';
 }
 for (const cs of F2L_IDX.cases) LLCARDS.push({ id: 'f2l-' + cs.n, set: 'F2L', name: 'F2L ' + cs.n, nick: '', group: f2lGroupOf(cs.state), f2l: cs });
+// 2-look CMLL cards (Roux): the algs are written for the Roux hold (first block on the bottom
+// left, CMLL on top). States and turns are converted to and from that hold with your first-block
+// choice (Roux drills → My first block).
+const CMLL_FREQ = { Sune: 4 / 27, Antisune: 4 / 27, H: 2 / 27, Pi: 4 / 27, 'U (headlights)': 4 / 27, 'T (chameleon)': 4 / 27, 'L (bowtie)': 4 / 27, 'Adjacent swap': 4 / 6, 'Diagonal swap': 1 / 6 };
+const cmSlug = (n) => n.replace(/\W+/g, '-').replace(/-$/, '');
+for (const [n, a] of ROUX.OC_ALGS) LLCARDS.push({ id: 'cmll-oc-' + cmSlug(n), set: 'CMLL', w: 'oc', key: n, name: n, nick: 'twist the corners', alg: a, group: 'Step 1: orient the corners' });
+for (const [n, a] of ROUX.PERM_ALGS) LLCARDS.push({ id: 'cmll-cp-' + cmSlug(n), set: 'CMLL', w: 'cp', key: n, name: n, nick: 'swap the corners', alg: a, group: 'Step 2: permute the corners' });
+function cardSvgSet(c){ return c.set === 'CMLL' ? (c.w === 'oc' ? 'CO' : 'CP') : c.set; }
+// cube turns <-> turns as written for the Roux hold (k = how far the M slice is turned)
+function cmToCur(mb){ return ROUX.FMAP[rdRot()].indexOf((mb / 3) | 0) * 3 + mb % 3; }
+function cmFromCur(mc){ return ROUX.FMAP[rdRot()][(mc / 3) | 0] * 3 + mc % 3; }
+function cmK(st){ return Math.max(0, ROUX.pairN(ROUX.conj(st, rdRot()))); }
+function cmHoldName(mc){ const fr = ROUX.frameFor(ll.cmK || 0), inv = {}; for (const x in fr) inv[fr[x]] = x; const g = FACES[(cmFromCur(mc) / 3) | 0]; return (inv[g] || g) + ['', '2', "'"][mc % 3]; }
+function cmIsTop(mc){ return cmHoldName(mc)[0] === 'U'; }
+function cmDoneBlock(c, b){ return c.w === 'oc' ? ROUX.cornersOriented(b) : ROUX.stageDone('cmll', b); }
 let f2lAlgCache = { lib: null, map: new Map() };
 function f2lCardAlg(c){
   if (f2lAlgCache.lib !== algLib) f2lAlgCache = { lib: algLib, map: new Map() };
@@ -2638,6 +2653,7 @@ function cardAlg(c){ if (c.set === 'F2L') return f2lCardAlg(c) || ''; const st =
 // The case itself is defined by the built-in alg; your own alg (if set) is what gets suggested and tracked.
 function cardCase(c){
   if (c.set === 'F2L') return c.f2l.state;
+  if (c.set === 'CMLL') { try { return ROUX.caseState(c.alg); } catch (e) { return E.solved(); } }
   const p = E.parseAlg(c.alg);
   return p ? E.applyMoves(E.solved(), E.invertMoves(p.moves)) : E.solved();
 }
@@ -2652,7 +2668,7 @@ function recentTimes(id){ return stat(id).hist.filter(h => h.ok).slice(-5).map(h
 function avg(a){ return a.length ? a.reduce((x, y) => x + y, 0) / a.length : null; }
 function setTarget(set){
   const avgs = LLCARDS.filter(c => c.set === set && stat(c.id).known).map(c => avg(recentTimes(c.id))).filter(x => x != null).sort((a, b) => a - b);
-  if (avgs.length < 5) return set === 'OLL' ? 3500 : set === 'F2L' ? 3000 : 4500;
+  if (avgs.length < 5) return set === 'OLL' ? 3500 : set === 'F2L' || set === 'CMLL' ? 3000 : 4500;
   return avgs[Math.floor(avgs.length / 2)];
 }
 const GRADES = ['Again', 'Hard', 'Good', 'Easy'];
@@ -2680,14 +2696,15 @@ function schedule(st, g, prev){
   st.reps++;
 }
 // Pick what to show next: cards that are due, slowest first; with nothing due, keep drilling the slow ones.
-function inSets(c){ if (ll.tabSet === 'F2L') return c.set === 'F2L'; return c.set !== 'F2L' && (ll.sets === 'both' || c.set === ll.sets); }
+function inSets(c){ if (ll.tabSet === 'F2L') return c.set === 'F2L'; if (ll.tabSet === 'CMLL') return c.set === 'CMLL'; return (c.set === 'OLL' || c.set === 'PLL') && (ll.sets === 'both' || c.set === ll.sets); }
+function isLLTab(t){ return t === 'll' || t === 'f2lc' || t === 'cmllc'; }
 // How slow this card is next to your other known cards in the same set (1 = typical).
 function slowness(c){
   const a = avg(recentTimes(c.id));
   const others = LLCARDS.filter(x => x.set === c.set && stat(x.id).known).map(x => avg(recentTimes(x.id))).filter(x => x != null).sort((p, q) => p - q);
   let s = a == null ? 1.5 : others.length >= 2 ? a / others[others.length >> 1] : 1;
   // OLL & PLL: how long the case takes inside your timed solves, next to your other cases
-  if (c.set !== 'F2L') {
+  if (c.set === 'OLL' || c.set === 'PLL') {
     const me = solveTime(c);
     if (me != null) {
       const ref = LLCARDS.filter(x => x.set === c.set).map(solveTime).filter(x => x != null).sort((p, q) => p - q);
@@ -2759,6 +2776,7 @@ const U_TURNS = [[], [0], [1], [2]];
 function f2lCardSlots(){ const v = settings.f2lCardSlot || 'any'; return v === 'any' ? [0, 1, 2, 3] : v === 'back' ? [2, 3] : [+v]; }
 function f2lCardNoRot(){ return settings.backSlot === 'norot' || (settings.f2lCardSlot || 'any') !== 'any'; }
 function randomLLState(card){
+  if (card.set === 'CMLL') { const b = ROUX.cmllCaseFor(card.w, card.key); return ROUX.unconj(b || ROUX.cmllCase(), rdRot()); }
   if (card.set === 'F2L') {
     const lls = LLCARDS.filter(c => c.set === 'OLL');
     let s = cardCase(lls[Math.floor(Math.random() * lls.length)]);
@@ -2827,6 +2845,7 @@ const LL_ALTS = {
 function buildAlgPaths(){
   const start = E.clone(llState());
   if (ll.card.set === 'F2L') return buildF2LPaths(start);
+  if (ll.card.set === 'CMLL') return buildCMLLPaths(start);
   // the card's alg, the ways you have been seen doing it, and common alternatives (e.g. no-M U perms):
   // any of them counts as doing the alg
   const st0 = stat(ll.card.id);
@@ -2847,6 +2866,26 @@ function buildAlgPaths(){
   }
   // the way you do it first, then your list's alg, then alternatives; fewest turns, then no rotation
   ll.paths.sort((x, y) => x.pref - y.pref || x.parsed.turns - y.parsed.turns || (/^y/.test(x.text) ? 1 : 0) - (/^y/.test(y.text) ? 1 : 0));
+  ll.follow = ll.paths[0] ? { path: ll.paths[0], pr: { i: 0, acc: 0 } } : null;
+  ll.off = [];
+}
+// CMLL cards: your alg (or the ways you have been seen doing it), with a U turn first if needed,
+// parsed for the Roux hold and turned into the turns your cube reports.
+function buildCMLLPaths(start){
+  ll.cmK = cmK(start);
+  const fr = ROUX.frameFor(ll.cmK), st0 = stat(ll.card.id), mine = st0.mine || [];
+  const algs = [...(st0.alg ? [[st0.alg, 0]] : []), ...mine.map(x => [x, 0]), [ll.card.alg, 1]];
+  const seen = new Set();
+  ll.paths = [];
+  for (const [alg, pref] of algs) for (let a = 0; a < 4; a++) {
+    const text = E.normalizeAlg(0, a, alg);
+    const pr = E.parseAlg(text, fr); if (!pr) continue;
+    const ms = pr.moves.map(cmToCur), key = ms.join(',');
+    if (seen.has(key) || !llDone(E.applyMoves(start, ms))) continue;
+    seen.add(key);
+    ll.paths.push({ k: 0, a, text, parsed: pr, idx: pathIndex(start, ms), pref, base: alg });
+  }
+  ll.paths.sort((x, y) => x.pref - y.pref || x.parsed.turns - y.parsed.turns);
   ll.follow = ll.paths[0] ? { path: ll.paths[0], pr: { i: 0, acc: 0 } } : null;
   ll.off = [];
 }
@@ -2911,6 +2950,7 @@ function undoText(ms, parsed, pr){
   const fp = firstPendingToken(parsed, pr);
   const fr = fp > 0 && parsed.frames ? parsed.frames[fp - 1] : null;
   const inv = {}; if (fr) for (const k in fr) inv[fr[k]] = k;
+  if (ll.card && ll.card.set === 'CMLL') { const f0 = fr || ROUX.frameFor(ll.cmK || 0), iv = {}; for (const k in f0) iv[f0[k]] = k; return ms.map(m => { const g = FACES[(cmFromCur(m) / 3) | 0]; return (iv[g] || g) + ['', '2', "'"][m % 3]; }).join(' '); }
   return ms.map(m => { const F = 'URFDLB'[(m / 3) | 0]; return (fr ? inv[F] : F) + ['', '2', "'"][m % 3]; }).join(' ');
 }
 function algProgressHtml(){
@@ -2938,6 +2978,7 @@ function algProgressHtml(){
 }
 function llState(){ return ll.mode === 'virtual' ? ll.vstate : cur; }
 function llDone(s){
+  if (ll.card.set === 'CMLL') return cmDoneBlock(ll.card, ROUX.conj(s, rdRot()));
   if (!E.f2lSolved(s)) return false;
   if (ll.card.set === 'F2L') return true;
   if (ll.card.set === 'OLL') { for (let i = 0; i < 4; i++) if (s.co[i] || s.eo[i]) return false; return true; }
@@ -2961,11 +3002,14 @@ function llTurn(m, f, b, raw){
 // Solved it cleanly but not with any alg Slotwise knows (no wasted turns, at most 2 turns longer than
 // the shortest known way)? Then it is your own alg: keep it, so it counts as the alg from now on.
 // The turns you just did on this card, without wasted turns or a U turn at either end
+// U turns at either end (the top layer as you hold the cube) and move names for the card's hold
+function llIsTop(m){ return ll.card && ll.card.set === 'CMLL' ? cmIsTop(m) : ((m / 3) | 0) === 0; }
+function llMoveText(ms){ return ms.map(m => ll.card && ll.card.set === 'CMLL' ? cmHoldName(m) : E.moveName(m)).join(' '); }
 function lastSolveText(){
   const net = []; for (const x of ll.moves) pushOff(net, x.m);
-  while (net.length && ((net[0] / 3) | 0) === 0) net.shift();
-  while (net.length && ((net[net.length - 1] / 3) | 0) === 0) net.pop();
-  return net.length ? net.map(E.moveName).join(' ') : null;
+  while (net.length && llIsTop(net[0])) net.shift();
+  while (net.length && llIsTop(net[net.length - 1])) net.pop();
+  return net.length ? llMoveText(net) : null;
 }
 function learnOwnWay(c, ok, htm){
   // did it cleanly with one of the alternatives: show that one from now on
@@ -2979,14 +3023,14 @@ function learnOwnWay(c, ok, htm){
   const best = Math.min(...ll.paths.map(p => E.mergeQuarterTurns(p.parsed.moves).length));
   if (net.length > best + 2) return;
   // drop a leading/trailing U turn: AUFs are added back as needed
-  let ms = net.slice(); while (ms.length && ((ms[0] / 3) | 0) === 0) ms.shift(); while (ms.length && ((ms[ms.length - 1] / 3) | 0) === 0) ms.pop();
-  const text = ms.map(E.moveName).join(' ');
+  let ms = net.slice(); while (ms.length && llIsTop(ms[0])) ms.shift(); while (ms.length && llIsTop(ms[ms.length - 1])) ms.pop();
+  const text = llMoveText(ms);
   const st = stat(c.id); st.mine = st.mine || [];
   if (!st.mine.includes(text)) { st.mine.unshift(text); st.mine = st.mine.slice(0, 3); toast('Got it: you do ' + c.name + ' as ' + text + '. That counts as the alg from now on.'); }
   ll.errs = 0;
 }
 // ---- drill a set: rotate through cards you pick (e.g. the G perms), random order, alg shown or hidden ----
-function drillKey(){ return ll.tabSet === 'F2L' ? 'F2L' : 'LL'; }
+function drillKey(){ return ll.tabSet === 'F2L' ? 'F2L' : ll.tabSet === 'CMLL' ? 'CMLL' : 'LL'; }
 function drillSel(){ settings.drillSets = settings.drillSets || {}; return (settings.drillSets[drillKey()] || []).filter(id => LLCARDS.some(c => c.id === id)); }
 function drillSetSel(ids){ settings.drillSets = settings.drillSets || {}; settings.drillSets[drillKey()] = ids; store.set('settings', settings); }
 function drillPicking(){ const b = $('drillBox'); return !!(b && b.open); }
@@ -3004,9 +3048,9 @@ function renderDrillBox(){
   const cs = LLCARDS.filter(inSets), groups = [];
   const fam = {}; cs.filter(c => c.set === 'PLL').forEach(c => { const k = c.name[0]; (fam[k] = fam[k] || []).push(c.id); });
   for (const k of Object.keys(fam).sort()) if (fam[k].length > 1) groups.push([k + ' perms', fam[k]]);
-  for (const g of [...new Set(cs.map(cardGroup))]) groups.push([g.replace(/^(OLL|PLL): /, '') + (ll.sets === 'both' ? ' (' + g.split(':')[0] + ')' : ''), cs.filter(c => cardGroup(c) === g).map(c => c.id)]);
+  for (const g of [...new Set(cs.map(cardGroup))]) groups.push([g.replace(/^(OLL|PLL|CMLL): /, '') + (ll.sets === 'both' ? ' (' + g.split(':')[0] + ')' : ''), cs.filter(c => cardGroup(c) === g).map(c => c.id)]);
   drillGroups = groups;
-  const name = (id) => { const c = LLCARDS.find(x => x.id === id); return c.set === 'PLL' ? c.name.replace(' perm', '') : c.set === 'OLL' ? '#' + c.name.split(' ')[1] : c.name.replace('F2L ', '#'); };
+  const name = (id) => { const c = LLCARDS.find(x => x.id === id); return c.set === 'CMLL' ? c.name : c.set === 'PLL' ? c.name.replace(' perm', '') : c.set === 'OLL' ? '#' + c.name.split(' ')[1] : c.name.replace('F2L ', '#'); };
   el.innerHTML = '<p class="hint" style="margin:0">While this is open, click cards below to add or remove them, or add a whole group. The drill shows them in random order (never the same one twice in a row), so you learn to tell similar cases apart.</p>' +
     (ll.tabSet === 'F2L' ? '' : '<div class="row" style="gap:6px;flex-wrap:wrap">' + groups.map((g, i) => '<button class="mini" data-dgroup="' + i + '">' + esc(g[0]) + '</button>').join('') + '</div>') +
     '<div class="row" style="gap:8px;flex-wrap:wrap"><span><b>' + sel.length + '</b> selected' + (sel.length ? ': ' + sel.map(name).join(', ') : '') + '</span>' +
@@ -3042,7 +3086,7 @@ function setDrillFinish(r){
 }
 function drillBarHtml(){
   const D = ll.drill;
-  const name = (id) => { const c = LLCARDS.find(x => x.id === id); return c.set === 'PLL' ? c.name.replace(' perm', '') : c.name.replace(/^(OLL|F2L) /, '#'); };
+  const name = (id) => { const c = LLCARDS.find(x => x.id === id); return c.set === 'CMLL' ? c.name : c.set === 'PLL' ? c.name.replace(' perm', '') : c.name.replace(/^(OLL|F2L) /, '#'); };
   const cells = D.ids.map(id => { const xs = D.times[id] || []; const last = xs[xs.length - 1]; return '<span class="pill' + (last ? (last.clean ? ' good' : ' warn') : '') + '" title="' + xs.length + ' this drill">' + esc(name(id)) + (last ? ' ' + fmt(last.t) : '') + '</span>'; }).join(' ');
   return '<div class="learnbar"><span class="hint">Drilling ' + D.ids.length + ' cards in random order.</span>' +
     '<button class="mini' + (D.show ? ' primary' : '') + '" data-drill="show" aria-pressed="' + D.show + '">Alg ' + (D.show ? 'shown' : 'hidden') + '</button>' +
@@ -3280,7 +3324,7 @@ function onGyro(qraw){
   gyroQ = { x: qraw.x / n, y: qraw.z / n, z: -qraw.y / n, w: qraw.w / n };
   yawUpdate();
   if (!gyroSeen) { gyroSeen = true; $('gyroHint').textContent = 'Gyro connected. Hold white on the bottom and green in front, then press Reset view.'; }
-  if ((activeTab === 'll' || activeTab === 'f2lc') && ll.mode === 'virtual' && !gyroRaf) gyroRaf = requestAnimationFrame(() => { gyroRaf = 0; applyOrientation(); });
+  if (isLLTab(activeTab) && ll.mode === 'virtual' && !gyroRaf) gyroRaf = requestAnimationFrame(() => { gyroRaf = 0; applyOrientation(); });
 }
 
 // --- rendering ---
@@ -3292,6 +3336,7 @@ function renderLL(){
   if (!c) {
     const anyKnown = LLCARDS.some(x => inSetsTab(x) && stat(x.id).known);
     const f2 = ll.tabSet === 'F2L';
+    if (ll.tabSet === 'CMLL') { box.innerHTML = '<p class="eyebrow">2-look CMLL cards</p><p class="phase-title">' + (anyKnown ? 'Press Next card to start' : 'Press New card to learn your first one') + '</p>' + blockSelectHtml('cmBlock') + '<p class="hint">Step 1 twists the four top corners so the top colour faces up; step 2 swaps them. New card starts with the most common case; the cards work like the OLL and PLL ones (practise, test, drill a set, your own algs).</p>'; return; }
     box.innerHTML = '<p class="eyebrow">' + (f2 ? 'F2L cards' : 'OLL & PLL cards') + '</p><p class="phase-title">' + (anyKnown ? 'Press Next card to start' : f2 ? 'Click a case to drill it' : 'Tick the cases you already know') + '</p>' +
       '<p class="hint">' + (f2 ? 'Every pair you solve in the F2L tab and the Timer is recorded here by case. The list is sorted by where you lose the most moves against the alg. Click a case to get a scramble with the other three pairs solved and that case set up in a random slot. Tick the ones you know to include them in Next card.' : anyKnown ? 'You can also click any case in the list to practise it.' : 'Use the list on the right, or press New card to learn one. Next card only shows cases you\'ve ticked.') + '</p>';
     return;
@@ -3302,9 +3347,10 @@ function renderLL(){
   const algTxt = f2Path ? f2Path.text : livePath ? livePath.text : cardAlg(c);
   let html = '<p class="eyebrow">' + c.set + (ll.drill ? ' · drill set, rep ' + (ll.drill.n + 1) : '') + (ll.from ? ' · from ' + esc(ll.from) : '') + (ll.drill ? '' : ll.test ? ' · test ' + ll.test.n + ' of 3 done' : ll.learning ? ' · learning, rep ' + ((ll.learnReps || 0) + 1) : ll.extra ? ' · extra practice (nothing due)' : st.reps ? ' · review' : '') + '</p>';
   const showName = ll.phase === 'done' || ll.revealed || ll.learning || (ll.phase === 'between' && !ll.test);
-  html += '<div class="llcard">' + (showName ? caseSVG(cardCase(c), c.set, 112) : hiddenSVG(112)) + '<div class="stage" style="gap:6px;flex:1;min-width:180px">' +
+  html += '<div class="llcard">' + (showName ? caseSVG(cardCase(c), cardSvgSet(c), 112) : hiddenSVG(112)) + '<div class="stage" style="gap:6px;flex:1;min-width:180px">' +
     '<div class="llname">' + (showName ? esc(c.name) + (c.nick ? ' <span class="hint">' + esc(c.nick) + '</span>' : '') : '?') + '</div>' +
     '<div class="llalg">' + (showName ? esc(algTxt) + rotNote(algTxt) + (c.set === 'F2L' && ll.f2lSlot != null && f2Path ? f2lSlotNote(ll.f2lSlot, f2Path) : '') : '<span class="hidealg">Recognise it ' + (ll.mode === 'virtual' ? 'on the virtual cube below' : 'on your cube') + '</span>') + '</div></div></div>';
+  if (c.set === 'CMLL' && (ll.phase === 'scrambling' || ll.phase === 'idle')) html += blockSelectHtml('cmBlock');
   if (ll.drill) html += drillBarHtml();
   else if (ll.learnFlow) html += learnBarHtml();
   else html += '<div class="learnbar"><span class="hint">Want to drill this one?</span><button class="mini" data-learn="practice">Practise it (alg shown)</button><button class="mini primary" data-learn="test">Test me</button></div>';
@@ -3312,8 +3358,10 @@ function renderLL(){
     const r = ll.lastRep;
     html += '<div class="timer ready">' + (r ? fmt(r.t) : '') + '</div><p class="hint">' + (ll.drill ? 'Next one…' : ll.test ? (r && r.ok && !r.revealed ? 'Correct. Next one…' : '') : 'Again…') + '</p>' + cardRotHtml(r);
   } else if (ll.phase === 'scrambling') {
-    const toks = ll.rem.map((r, i) => '<span class="tok' + (i === 0 ? ' next' : '') + (r.fix ? ' fix' : '') + (r.partial && i === 0 ? ' part' : '') + '">' + tokText(r) + '</span>').join('');
-    html += '<p class="eyebrow">Scramble · ' + ll.rem.length + ' to go</p><div class="scr">' + toks + '</div><p class="hint">The timer starts as soon as the scramble is done.' + (ll.learning ? '' : ' The case stays hidden until you have solved it.') + '</p>';
+    const cm = c.set === 'CMLL';
+    const toks = ll.rem.map((r, i) => '<span class="tok' + (i === 0 ? ' next' : '') + (r.fix ? ' fix' : '') + (r.partial && i === 0 ? ' part' : '') + '">' + (cm ? rouxTok(r) : tokText(r)) + '</span>').join('');
+    const hc = cm ? rotColors(rdRot()) : null;
+    html += '<p class="eyebrow">Scramble · ' + ll.rem.length + ' to go</p><div class="scr">' + toks + '</div><p class="hint">' + (cm ? 'Hold ' + swc(hc.bottom) + hc.bottom + ' on the bottom and ' + swc(hc.left) + hc.left + ' on the left. ' : '') + 'The timer starts as soon as the scramble is done.' + (ll.learning ? '' : ' The case stays hidden until you have solved it.') + '</p>';
   } else if (ll.phase === 'running') {
     html += '<div class="timer" id="llTimer">' + fmt(performance.now() - ll.t0) + '</div>' + algProgressHtml() +
       '<div class="row">' + (ll.learning || (ll.drill && ll.revealed) ? '' : ll.revealed ? '<span class="hint">Do the alg to finish the card.' + (ll.test ? ' The test starts over after this.' : ' It counts as Again.') + '</span>' : '<button id="llHint">Hint: next move</button><button id="llGiveUp">I don\'t know it</button>') + '</div>';
@@ -3356,11 +3404,11 @@ function renderDeck(){
     const colr = ratio == null ? 'var(--line)' : ratio > 1.25 ? 'var(--bad)' : ratio > 0.9 ? 'var(--warn)' : 'var(--good)';
     const mr = st.known ? mistakeRate(c) : null;
     let meta = !st.known ? 'not learned' : a == null ? 'no times yet' : fmt(a) + ' s' + (mr ? ' · <b style="color:var(--warn)">' + Math.round(mr * 100) + '% slips</b>' : '');
-    if (c.set !== 'F2L') { const ss = solveStats(c); if (ss) meta += (st.known ? ' · ' : ' · ') + 'in solves ' + fmt(ss.t) + ' s'; }
+    if (c.set === 'OLL' || c.set === 'PLL') { const ss = solveStats(c); if (ss) meta += (st.known ? ' · ' : ' · ') + 'in solves ' + fmt(ss.t) + ' s'; }
     if (c.set === 'F2L') { const fs = f2lSeenStats(c); if (fs) meta = 'seen ' + fs.n + '×' + (fs.extra != null ? ' · <b style="color:' + (fs.extra > 1.5 ? 'var(--bad)' : fs.extra > 0.3 ? 'var(--warn)' : 'var(--good)') + '">' + (fs.extra > 0 ? '+' : '') + fs.extra.toFixed(1) + '</b>' : ''); }
     return '<div class="tile' + (st.known || c.set === 'F2L' ? '' : ' unknown') + (ll.card && ll.card.id === c.id ? ' cur' : '') + (drillPicking() && drillSel().includes(c.id) ? ' insel' : '') + '" data-card="' + c.id + '" role="button" tabindex="0" title="' + esc(tileTip(c)) + '">' +
       '<label title="I know this case"><input type="checkbox" data-known="' + c.id + '"' + (st.known ? ' checked' : '') + ' aria-label="I know ' + esc(c.name) + '"></label>' +
-      caseSVG(cardCase(c), c.set, 64) + '<span class="tname">' + esc(c.set === 'PLL' ? c.name.replace(' perm', '') : '#' + c.name.split(' ')[1]) + '</span>' +
+      caseSVG(cardCase(c), cardSvgSet(c), 64) + '<span class="tname">' + esc(c.set === 'CMLL' ? c.name : c.set === 'PLL' ? c.name.replace(' perm', '') : '#' + c.name.split(' ')[1]) + '</span>' +
       '<span class="tmeta">' + meta + '</span><span class="spd"><i style="width:' + (ratio == null ? 0 : Math.min(100, 100 / Math.max(ratio, 0.5) / 2)) + '%;background:' + colr + '"></i></span></div>';
   }).join('');
   const known = cards.filter(c => stat(c.id).known);
@@ -3375,7 +3423,8 @@ function renderDeck(){
     const ex = all.filter(x => x.extra != null);
     const exAvg = ex.length ? ex.reduce((a, x) => a + x.extra * x.n, 0) / ex.reduce((a, x) => a + x.n, 0) : null;
     $('llKpis').innerHTML = kpi(known.length + ' / ' + cards.length, 'known') + kpi(weakestTxt(known), 'weakest right now') + kpi(n, 'pairs recorded') + kpi(exAvg == null ? '—' : (exAvg > 0 ? '+' : '') + exAvg.toFixed(1), 'moves vs alg, per pair') + kpi(setAvg('F2L'), 'card average');
-  } else
+  } else if (ll.tabSet === 'CMLL') $('llKpis').innerHTML = kpi(known.length + ' / ' + cards.length, 'known') + kpi(weakestTxt(known), 'weakest right now') + kpi(setAvg('CMLL'), 'card average');
+  else
   $('llKpis').innerHTML = kpi(known.length + ' / ' + cards.length, 'known') + kpi(weakestTxt(known), 'weakest right now') + kpi(setAvg('OLL'), 'OLL average') + kpi(setAvg('PLL'), 'PLL average');
 }
 function weakestTxt(known){
@@ -3406,6 +3455,14 @@ function algEditHtml(c){
 }
 function saveCardAlg(c, text){
   const t = String(text || '').trim();
+  if (c.set === 'CMLL') {
+    if (!E.parseAlg(t) || !E.parseAlg(t).moves.length) return 'Can\'t read that alg.';
+    for (let i = 0; i < 8; i++) {
+      const b = ROUX.cmllCaseFor(c.w, c.key); if (!b) continue;
+      if (!['', 'U ', 'U2 ', "U' "].some(a => { const pr = E.parseAlg(a + t); return pr && cmDoneBlock(c, E.applyMoves(b, pr.moves)); })) return 'That alg doesn\'t solve ' + c.name + ' with the blocks kept (written with the first block on the bottom left).';
+    }
+    stat(c.id).alg = (t === c.alg) ? undefined : t; saveLL(); return null;
+  }
   const hit = cardForAlg(t);
   if (!hit) return 'That alg doesn\'t solve a last-layer case without breaking F2L.';
   if (hit.id !== c.id) return 'That alg solves ' + hit.name + ', not ' + c.name + '.';
@@ -3460,6 +3517,7 @@ function caseFreq(){
   }
   const tot = F2L_IDX.cases.reduce((a, x) => a + x.size, 0);
   for (const c of LLCARDS) if (c.set === 'F2L') CASE_FREQ[c.id] = c.f2l.size / tot;
+  for (const c of LLCARDS) if (c.set === 'CMLL') CASE_FREQ[c.id] = CMLL_FREQ[c.key] || 0;
   return CASE_FREQ;
 }
 function tileTip(c){
@@ -3467,6 +3525,7 @@ function tileTip(c){
     const fs = f2lSeenStats(c);
     return c.name + ' · ' + c.group + ': ' + cardAlg(c) + (fs ? ' · in your solves: ' + fs.n + '×, ' + (fs.extra != null ? (fs.extra > 0 ? '+' : '') + fs.extra.toFixed(1) + ' moves vs the alg, ' + Math.round(fs.clean * 100) + '% as short as the alg' : '') + (fs.t != null ? ', ' + fmt(fs.t) + ' s' : '') : ' · not seen in your solves yet');
   }
+  if (c.set === 'CMLL') return c.name + ' (' + c.group.toLowerCase() + '): ' + cardAlg(c) + ' · comes up ' + freqText(c);
   const ss = solveStats(c);
   return c.name + ': ' + cardAlg(c) + ' · comes up ' + freqText(c) + (ss ? ' · in your timed solves: ' + ss.n + '×, look ' + fmt(ss.look) + ' s + turn ' + fmt(ss.turn) + ' s' : seenInSolves(c) ? ' · seen ' + seenInSolves(c) + '× in your timed solves' : '');
 }
@@ -3487,7 +3546,7 @@ function cardGroup(c){
   return 'OLL: ' + c.nick;
 }
 function poolSettings(){
-  const key = ll.tabSet === 'F2L' ? 'f2lPool' : 'llPool';
+  const key = ll.tabSet === 'F2L' ? 'f2lPool' : ll.tabSet === 'CMLL' ? 'cmllPool' : 'llPool';
   const P = settings[key] || (settings[key] = { groups: [], order: ll.tabSet === 'F2L' ? 'worst' : 'freq' });
   // drop group names that no longer exist (the groups now follow J Perm's)
   const valid = new Set(LLCARDS.map(cardGroup));
@@ -3499,7 +3558,8 @@ function poolCards(){
   const gs = P.groups.filter(g => LLCARDS.some(c => inSets(c) && cardGroup(c) === g));
   let cs = LLCARDS.filter(c => !stat(c.id).known && inSets(c) && (!gs.length || gs.includes(cardGroup(c))));
   const f = caseFreq();
-  if (P.order === 'freq') cs.sort((a, b) => (f[b.id] || 0) - (f[a.id] || 0));
+  // 2-look CMLL: learn the twisting step before the swapping step
+  if (P.order === 'freq') cs.sort((a, b) => (a.set === 'CMLL' && b.set === 'CMLL' ? (a.w === 'oc' ? 0 : 1) - (b.w === 'oc' ? 0 : 1) : 0) || (f[b.id] || 0) - (f[a.id] || 0));
   else if (P.order === 'mine') cs.sort((a, b) => (a.set === 'F2L' ? ((f2lSeenStats(b) || {}).n || 0) - ((f2lSeenStats(a) || {}).n || 0) : seenInSolves(b) - seenInSolves(a)) || (f[b.id] || 0) - (f[a.id] || 0));
   else if (P.order === 'worst') cs.sort((a, b) => (((f2lSeenStats(b) || {}).extra ?? -9) - ((f2lSeenStats(a) || {}).extra ?? -9)) || (f[b.id] || 0) - (f[a.id] || 0));
   else if (P.order === 'random') cs.sort(() => Math.random() - 0.5);
@@ -3511,7 +3571,7 @@ function renderPool(){
   const groups = [];
   for (const c of LLCARDS) { if (!inSetsTab(c)) continue; const g = cardGroup(c); let e = groups.find(x => x.name === g); if (!e) groups.push(e = { name: g, cards: [] }); e.cards.push(c); }
   $('poolOrder').querySelector('[value="worst"]').hidden = ll.tabSet !== 'F2L';
-  $('algsBox').hidden = ll.tabSet === 'F2L';
+  $('algsBox').hidden = ll.tabSet !== 'LL';
   groups.sort((x, y) => (x.name.startsWith('PLL') ? 0 : 1) - (y.name.startsWith('PLL') ? 0 : 1));
   $('poolOrder').value = P.order;
   $('poolGroups').innerHTML = groups.map(g => {
@@ -3530,7 +3590,7 @@ function newCard(){
   presentCard(c, { learning: true });
 }
 // ---- drills: one top-level tab, with a sub-nav per method ----
-const DRILL_TABS = ['cross', 'f2l', 'f2lc', 'll', 'tricks', 'rxd'];
+const DRILL_TABS = ['cross', 'f2l', 'f2lc', 'll', 'tricks', 'rxd', 'cmllc'];
 const DRILL_SUBS = {
   cfop: [['cross', 'Cross'], ['f2l', 'F2L'], ['oll', 'OLL'], ['pll', 'PLL'], ['tricks', 'Finger tricks']],
   roux: [['fb', 'First block'], ['sb', 'Second block'], ['cmll', 'Corners (CMLL)'], ['lse', 'Last six edges'], ['tricks', 'Finger tricks']],
@@ -3540,6 +3600,7 @@ function curSub(){
   if (t === 'f2l' || t === 'f2lc') return 'f2l';
   if (t === 'll') return ll.sets === 'PLL' ? 'pll' : 'oll';
   if (t === 'rxd') return rd.kind;
+  if (t === 'cmllc') return 'cmll';
   return t;
 }
 function goSub(s){
@@ -3549,6 +3610,7 @@ function goSub(s){
     if (ll.sets !== set) { ll.sets = settings.llSets = set; store.set('settings', settings); if (ll.tabSet === 'LL') { ll.card = null; ll.phase = 'idle'; ll.drill = null; ll.learnFlow = false; ll.test = null; } }
     return setTab('ll');
   }
+  if (s === 'cmll' && cmMode() === 'cards') return setTab('cmllc');
   if (RD_KINDS.some(([k]) => k === s)) { rd.kind = settings.rdKind = s; store.set('settings', settings); return setTab('rxd'); }
   setTab(s);
 }
@@ -3559,10 +3621,12 @@ function renderDrillNav(){
   const sub = curSub();
   let h = '<div class="seg" role="group" aria-label="Drill">' + DRILL_SUBS[curMethod()].map(([k, n]) => '<button data-sub="' + k + '" aria-pressed="' + (k === sub) + '">' + n + '</button>').join('') + '</div>';
   if (sub === 'f2l') h += '<div class="seg" role="group" aria-label="F2L mode"><button data-f2lmode="solve" aria-pressed="' + (activeTab === 'f2l') + '">Solve trainer</button><button data-f2lmode="cards" aria-pressed="' + (activeTab === 'f2lc') + '">Cards</button></div>';
+  if (sub === 'cmll') h += '<div class="seg" role="group" aria-label="CMLL mode"><button data-cmllmode="cards" aria-pressed="' + (activeTab === 'cmllc') + '">Cards</button><button data-cmllmode="mix" aria-pressed="' + (activeTab === 'rxd') + '">Random cases</button></div>';
   nav.innerHTML = h;
 }
 function setTab(t){
   if (t === 'drills') { const m = curMethod(); const last = (settings.drillSub || {})[m]; return goSub(DRILL_SUBS[m].some(([k]) => k === last) ? last : m === 'roux' ? rd.kind : 'f2l'); }
+  if (t === 'rxd' && rd.kind === 'cmll' && cmMode() === 'cards') t = 'cmllc';
   const prev = activeTab;
   activeTab = t;
   if (TAB_METHOD[t] !== 'both' && TAB_METHOD[t] !== curMethod()) { settings.method = TAB_METHOD[t]; store.set('settings', settings); }
@@ -3570,7 +3634,7 @@ function setTab(t){
   $('tabRoux').hidden = t !== 'roux'; $('tabRxd').hidden = t !== 'rxd';
   if (prev === 'roux' && t !== 'roux') { cancelAnimationFrame(rx.raf); rx.phase = 'idle'; }
   if (prev === 'rxd' && t !== 'rxd') { cancelAnimationFrame(rd.raf); rd.phase = 'idle'; }
-  const llLike = t === 'll' || t === 'f2lc';
+  const llLike = isLLTab(t);
   $('tabF2L').hidden = t !== 'f2l'; $('tabLL').hidden = !llLike; $('tabTimer').hidden = t !== 'timer'; $('tabPlan').hidden = t !== 'plan'; $('tabTricks').hidden = t !== 'tricks'; $('tabCross').hidden = t !== 'cross';
   document.querySelectorAll('[data-tab]').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === t || (b.dataset.tab === 'drills' && DRILL_TABS.includes(t))));
   if (DRILL_TABS.includes(t)) {
@@ -3580,8 +3644,8 @@ function setTab(t){
   }
   renderDrillNav();
   if (prev === 'f2l' && t !== 'f2l') { if (phase === 'solving') cancelAnimationFrame(rafId); practice = null; }
-  if ((prev === 'll' || prev === 'f2lc') && t !== prev) { ll.phase = ll.phase === 'running' || ll.phase === 'scrambling' || ll.phase === 'between' ? 'idle' : ll.phase; ll.learnFlow = false; ll.test = null; }
-  if (llLike) { const ts = t === 'f2lc' ? 'F2L' : 'LL'; if (ll.tabSet !== ts) { ll.tabSet = ts; ll.card = null; ll.phase = 'idle'; } }
+  if (isLLTab(prev) && t !== prev) { ll.phase = ll.phase === 'running' || ll.phase === 'scrambling' || ll.phase === 'between' ? 'idle' : ll.phase; ll.learnFlow = false; ll.test = null; }
+  if (llLike) { const ts = t === 'f2lc' ? 'F2L' : t === 'cmllc' ? 'CMLL' : 'LL'; if (ll.tabSet !== ts) { ll.tabSet = ts; ll.card = null; ll.phase = 'idle'; } }
   if (prev === 'timer' && t !== 'timer') { cancelAnimationFrame(tm.raf); tm.phase = 'idle'; }
   if (prev === 'cross' && t !== 'cross') { cancelAnimationFrame(cx.raf); cx.phase = 'idle'; }
   if (llLike) { renderLL(); renderDeck(); }
@@ -3637,7 +3701,7 @@ function caseMaps(){
   if (OLL_BY_KEY) return;
   OLL_BY_KEY = new Map(); PLL_BY_KEY = new Map();
   for (const c of LLCARDS) {
-    if (c.set === 'F2L') continue;
+    if (c.set !== 'OLL' && c.set !== 'PLL') continue;
     const st = cardCase(c);
     if (c.set === 'OLL') OLL_BY_KEY.set(canonOri(st), c); else PLL_BY_KEY.set(canonPerm(st), c);
   }
@@ -4066,7 +4130,7 @@ function redoFromTimer(sid, key){
     retryScramble(rec.id, from, note);
   } else {
     const step = sp.steps.find(x => x.name === kind.toUpperCase());
-    const card = LLCARDS.find(c => c.name === step.case || c.name === step.case + ' perm');
+    const card = LLCARDS.find(c => (c.set === 'OLL' || c.set === 'PLL') && (c.name === step.case || c.name === step.case + ' perm'));
     if (!card) return;
     const pos = kind === 'oll' ? E.applyMoves(s.start, s.moves.slice(0, sp.iF2L).map(x => x[0])) : E.applyMoves(s.start, s.moves.slice(0, stepEndIndex(sp, 'OLL')).map(x => x[0]));
     ll.sets = settings.llSets = card.set; store.set('settings', settings);
@@ -4233,7 +4297,7 @@ function practiceMetrics(){
   const cf = crossLog.filter(x => x.first && !x.shown).slice(-30);
   M.crossClean = cf.length >= 3 ? cf.filter(x => x.ok).length / cf.length : null; M.crossN = cf.length;
   // last layer cards
-  const known = LLCARDS.filter(c => c.set !== 'F2L' && stat(c.id).known);
+  const known = LLCARDS.filter(c => (c.set === 'OLL' || c.set === 'PLL') && stat(c.id).known);
   const timed = known.filter(c => stat(c.id).hist.some(h => !h.learn));
   M.llKnown = known.length;
   M.llWeak = timed.filter(c => weakness(c) > 1.4).map(c => c.name);
@@ -4864,7 +4928,7 @@ let rxSolves = store.get('rouxSolves', []);
 let rdLog = store.get('rouxDrills', []);
 const rx = { phase: 'idle', target: null, rem: [], scr: '', start: null, moves: [], t0: 0, inspStart: 0, raf: 0, viewId: rxSolves[0] ? rxSolves[0].id : null, lost: false, cache: null, justDone: false };
 const rd = { kind: settings.rdKind || 'fb', phase: 'idle', target: null, rem: [], start: null, moves: [], t0: 0, raf: 0, last: null };
-const TAB_METHOD = { plan: 'cfop', f2l: 'cfop', ll: 'cfop', f2lc: 'cfop', cross: 'cfop', timer: 'cfop', roux: 'roux', rxd: 'roux', tricks: 'both', drills: 'both' };
+const TAB_METHOD = { plan: 'cfop', f2l: 'cfop', ll: 'cfop', f2lc: 'cfop', cmllc: 'roux', cross: 'cfop', timer: 'cfop', roux: 'roux', rxd: 'roux', tricks: 'both', drills: 'both' };
 function curMethod(){ return settings.method === 'roux' ? 'roux' : 'cfop'; }
 function applyMethod(){
   const m = curMethod();
@@ -5156,6 +5220,10 @@ function cmCardsHtml(){
 }
 function fbVar(){ return settings.fbVar || 'full'; }
 const FB_VARS = [['full', 'Whole block'], ['lp', 'Last pair'], ['lpdr', 'Last pair + DR']];
+function blockSelectHtml(id){
+  const r = rdRot();
+  return '<div class="row"><label class="hint" for="' + id + '">My first block</label><select id="' + id + '">' + ROUX.ROTS.map((_, i) => { const c = rotColors(i); return [i, c.bottom + ' bottom, ' + c.left + ' on the left']; }).sort((a, b) => a[1] < b[1] ? -1 : 1).map(([i, t]) => '<option value="' + i + '"' + (i === r ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></div>';
+}
 function rdRot(){ return settings.rouxRot == null ? 0 : settings.rouxRot; }
 function rdNew(){
   if (!solverReady) return;
@@ -5288,7 +5356,7 @@ function rdHint(){
 function renderRd(){
   const box = $('rdBox'); if (!box) return;
   const r = rdRot();
-  let h = '<div class="row"><label class="hint" for="rdBlock">My first block</label><select id="rdBlock">' + ROUX.ROTS.map((_, i) => { const c = rotColors(i); return [i, c.bottom + ' bottom, ' + c.left + ' on the left']; }).sort((a, b) => a[1] < b[1] ? -1 : 1).map(([i, t]) => '<option value="' + i + '"' + (i === r ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></div>';
+  let h = blockSelectHtml('rdBlock');
   if (rd.kind === 'fb') {
     const v = fbVar(), sq = settings.fbSq || 'back';
     h += '<div class="row" style="margin-top:8px"><div class="seg" role="group" aria-label="What to build">' + FB_VARS.map(([k, n]) => '<button data-fbvar="' + k + '" aria-pressed="' + (k === v) + '">' + n + '</button>').join('') + '</div>' +
@@ -5357,7 +5425,7 @@ $('tabRxd').addEventListener('click', (e) => {
   if (cr) { const rot = cmRot(), id = cr.dataset.cmrot; if (cr.checked) { if (!rot.includes(id)) rot.push(id); } else settings.cmllCards = rot.filter(x => x !== id); store.set('settings', settings); renderRd(); return; }
   if (e.target.closest('.tile label')) return;
   const ct = e.target.closest('[data-cmcard]'); if (ct) { rd.forceCard = ct.dataset.cmcard; rd.last = null; rdNew(); return; }
-  const cmm = e.target.closest('[data-cmmode]'); if (cmm) { settings.cmllMode = cmm.dataset.cmmode; store.set('settings', settings); rd.last = null; rdNew(); return; }
+  const cmm = e.target.closest('[data-cmmode]'); if (cmm) { settings.cmllMode = cmm.dataset.cmmode; store.set('settings', settings); if (cmm.dataset.cmmode === 'cards') { setTab('cmllc'); return; } rd.last = null; rdNew(); return; }
   if (e.target.closest('[data-cmpeek]')) { rd.peek = true; renderRd(); return; }
   const fv = e.target.closest('[data-fbvar]'); if (fv) { settings.fbVar = fv.dataset.fbvar; store.set('settings', settings); rd.last = null; rdNew(); return; }
   const k = e.target.closest('[data-rdkind]'); if (k) { rd.kind = k.dataset.rdkind; settings.rdKind = rd.kind; store.set('settings', settings); rdNew(); return; }
@@ -5461,6 +5529,7 @@ document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => setTab(b.
 $('drillNav').addEventListener('click', (e) => {
   const s = e.target.closest('[data-sub]'); if (s) { goSub(s.dataset.sub); return; }
   const f = e.target.closest('[data-f2lmode]'); if (f) setTab(f.dataset.f2lmode === 'cards' ? 'f2lc' : 'f2l');
+  const cmn = e.target.closest('[data-cmllmode]'); if (cmn) { settings.cmllMode = cmn.dataset.cmllmode; store.set('settings', settings); if (cmn.dataset.cmllmode === 'cards') setTab('cmllc'); else { rd.kind = settings.rdKind = 'cmll'; setTab('rxd'); } }
 });
 document.querySelectorAll('[data-llmode]').forEach(b => b.onclick = () => {
   ll.mode = b.dataset.llmode; settings.llMode = ll.mode; store.set('settings', settings);
@@ -5469,6 +5538,20 @@ document.querySelectorAll('[data-llmode]').forEach(b => b.onclick = () => {
 $('llNext').onclick = nextCard;
 $('llNew').onclick = () => { ll.drill = null; newCard(); };
 $('drillBox').addEventListener('toggle', () => renderDeck());
+document.addEventListener('change', (e) => {
+  if (e.target.id !== 'cmBlock') return;
+  settings.rouxRot = +e.target.value; store.set('settings', settings); rd.last = null;
+  if (activeTab === 'cmllc' && ll.card && ll.card.set === 'CMLL' && (ll.phase === 'scrambling' || ll.phase === 'running')) presentCard(ll.card, { learnFlow: ll.learnFlow, test: ll.test });
+  else renderLL();
+});
+// The old Roux card list (Roux drills → CMLL): carry the cards you had ticked over as known cards.
+if (!settings.cmllMigrated) {
+  for (const id of (Array.isArray(settings.cmllCards) ? settings.cmllCards : [])) {
+    const [w, n] = id.split(':'); const c = LLCARDS.find(x => x.set === 'CMLL' && x.w === w && x.key === n);
+    if (c && !stat(c.id).known) stat(c.id).known = true;
+  }
+  settings.cmllMigrated = true; store.set('settings', settings); saveLL();
+}
 document.addEventListener('toggle', (e) => { if (e.target.classList && e.target.classList.contains('cubestat')) { settings.statusOpen = e.target.open; store.set('settings', settings); if (e.target.open) renderNet(); } }, true);
 $('drillBox').addEventListener('click', (e) => {
   const g = e.target.closest('[data-dgroup]'); if (g) { drillToggle(drillGroups[+g.dataset.dgroup][1]); return; }
@@ -5526,7 +5609,7 @@ $('deck').addEventListener('click', (e) => {
 });
 $('deck').addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-card]')) { e.preventDefault(); e.target.click(); } });
 document.addEventListener('keydown', (e) => {
-  if ((activeTab !== 'll' && activeTab !== 'f2lc') || e.key !== ' ' || e.target.closest('input,textarea,select,button,[data-card]')) return;
+  if (!isLLTab(activeTab) || e.key !== ' ' || e.target.closest('input,textarea,select,button,[data-card]')) return;
   e.preventDefault(); nextCard();
 });
 build3D();
@@ -5704,7 +5787,7 @@ renderSessBars();
 applyMethod();
 boot();
 try { renderRunBar(); } catch (e) {}
-try { const tb = sessionStorage.getItem('slotwise.tab'); if (['ll', 'timer', 'f2lc', 'plan', 'tricks', 'cross', 'roux', 'rxd'].includes(tb)) setTab(tb); else setTab(curMethod() === 'roux' ? 'roux' : 'timer'); } catch (e) { setTab(curMethod() === 'roux' ? 'roux' : 'timer'); }
+try { const tb = sessionStorage.getItem('slotwise.tab'); if (['ll', 'timer', 'f2lc', 'cmllc', 'plan', 'tricks', 'cross', 'roux', 'rxd'].includes(tb)) setTab(tb); else setTab(curMethod() === 'roux' ? 'roux' : 'timer'); } catch (e) { setTab(curMethod() === 'roux' ? 'roux' : 'timer'); }
 window.__slotwise = { get rx(){ return rx; }, get rd(){ return rd; }, get rxSolves(){ return rxSolves; }, get rdLog(){ return rdLog; }, setTab, ROUX, get phase(){ return phase; }, get rem(){ return rem; }, get cur(){ return cur; }, get target(){ return target; }, get practice(){ return practice; }, get ll(){ return ll; }, get tm(){ return tm; }, caseFreq, poolCards, LLCARDS, pathBetween, renderTimer, get tSolves(){ return tSolves; }, get conn(){ return conn; }, set conn(v){ conn = v; }, retryScramble, handleTurn, queueVirtual, demoSolve, onCubeEvent, faceletsToUser, facelets };
 })();
 </script>
