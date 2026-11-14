@@ -5017,13 +5017,20 @@ function cubeStatusHtml(){
   if (!conn) return '';
   return '<details class="cubestat"' + (settings.statusOpen ? ' open' : '') + '><summary>Cube status</summary>' +
     '<div class="netbox" style="margin-top:8px"><div><p class="eyebrow">What the app thinks your cube looks like</p><div class="net live" aria-label="Tracked cube"></div>' +
-    '<p class="hint">' + esc(SCHEME[settings.cross].D) + ' on the bottom, ' + esc(SCHEME[settings.cross].F) + ' in front. If it doesn\'t match your cube, re-sync.</p></div></div>' +
+    '<p class="hint">' + esc(SCHEME[settings.cross].D) + ' on the bottom, ' + esc(SCHEME[settings.cross].F) + ' in front. If it doesn\'t match your cube, re-sync. If re-syncing brings back the same wrong picture, the cube itself lost count: solve it and press My cube is solved, which resets the cube too.</p></div></div>' +
     '<div class="row"><button data-resync="1">Re-sync from cube</button><button data-cubesolved="1">My cube is solved</button><button data-btlog="1">Copy Bluetooth log</button></div></details>';
 }
 // The cube is solved in your hands but the app thinks otherwise: trust the cube.
 function markSolved(){
   btNote({ ev: 'solved-button' });
   cur = E.solved();
+  // The cube keeps its own copy of its state, and that copy is what a re-sync reads. If the cube
+  // itself missed a turn (e.g. half of a fast M), only resetting it fixes later syncs.
+  if (conn) {
+    clearTimeout(idleSyncT); clearTimeout(syncRetryT); syncRetries = 0; forceSync = false;
+    conn.sendCubeCommand({ type: 'REQUEST_RESET' }).catch(() => {});
+    setTimeout(() => { if (!conn) return; needInitialSync = true; lastMoveSerial = null; conn.sendCubeCommand({ type: 'REQUEST_FACELETS' }).catch(() => {}); }, 400);
+  }
   if (activeTab === 'roux' && rx.phase === 'running') { rx.lost = true; rxFinish(); toast('Saved with the time of your last turn. Splits need every turn, so this one has none.'); }
   else onResync();
   renderNet(); renderSlotChips();
