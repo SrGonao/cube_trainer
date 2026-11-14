@@ -1542,6 +1542,93 @@ if (typeof module !== 'undefined' && module.exports) module.exports = api; else 
     return { opt: r.opt, sols: finish(s, r.raw, true, show) };
   }
 
+  // ----- second-block solver -----
+  // With the first block kept, the second block is built with U, R, M and r only. Seen from the
+  // first block (L face held still) those are fixed piece permutations, whatever the centres do,
+  // so the table is over the five second-block pieces: DR, FR, BR, DFR and DBR.
+  const SB_NAMES = ['U', 'R', 'M', 'r'];
+  const SB_MC = []; for (const b of SB_NAMES) for (const sf of ['', '2', "'"]) SB_MC.push(fromCube(new CubeLib().move(b + sf)));
+  const SB_NM = 12;
+  const sbFollow = (m, last) => { if (last < 0) return true; const f = (m / 3) | 0, g = (last / 3) | 0; if (f === g) return false; if (f === 0 || g === 0) return true; return f > g; };
+  let SBT = null;
+  function pieceMoves(MC, nm) {
+    const em = new Int16Array(24 * nm), cm = new Int16Array(24 * nm);
+    for (let m = 0; m < nm; m++) { const M = MC[m];
+      for (let i = 0; i < 12; i++) { const j = M.ep[i]; for (let o = 0; o < 2; o++) em[(j * 2 + o) * nm + m] = i * 2 + ((o + M.eo[i]) % 2); }
+      for (let i = 0; i < 8; i++) { const j = M.cp[i]; for (let o = 0; o < 3; o++) cm[(j * 3 + o) * nm + m] = i * 3 + ((o + M.co[i]) % 3); } }
+    return { em, cm };
+  }
+  const pcode = (s, es, cs) => { let c = 0; for (const p of es) { const i = s.ep.indexOf(p); c = c * 24 + i * 2 + s.eo[i]; } for (const p of cs) { const i = s.cp.indexOf(p); c = c * 24 + i * 3 + s.co[i]; } return c; };
+  // breadth-first distances for a set of pieces (edges then corners, 24 values each)
+  function pieceBFS(es, cs, em, cm, nm) {
+    const k = es.length + cs.length, N = Math.pow(24, k), dist = new Int8Array(N).fill(-1), q = new Int32Array(N);
+    const v = new Array(k); let head = 0, tail = 0;
+    const c0 = pcode(E.solved(), es, cs); dist[c0] = 0; q[tail++] = c0;
+    while (head < tail) {
+      let c = q[head++]; const d = dist[c] + 1;
+      for (let i = k - 1; i >= 0; i--) { v[i] = c % 24; c = (c / 24) | 0; }
+      for (let m = 0; m < nm; m++) {
+        let n2 = 0; for (let i = 0; i < k; i++) n2 = n2 * 24 + (i < es.length ? em[v[i] * nm + m] : cm[v[i] * nm + m]);
+        if (dist[n2] < 0) { dist[n2] = d; q[tail++] = n2; }
+      }
+    }
+    return dist;
+  }
+  const SQ = { front: [[4, 8], [4]], back: [[4, 11], [7]] }; // DR + FR + DFR, DR + BR + DBR
+  function sbBuild() {
+    if (SBT) return;
+    const { em, cm } = pieceMoves(SB_MC, SB_NM);
+    SBT = { em, cm, full: pieceBFS(SBE, SBC, em, cm, SB_NM), front: pieceBFS(SQ.front[0], SQ.front[1], em, cm, SB_NM), back: pieceBFS(SQ.back[0], SQ.back[1], em, cm, SB_NM) };
+  }
+  // what to solve: 'full' (whole second block) or 'fs' (either square: DR plus one pair)
+  function sbDist(s, goal) {
+    sbBuild();
+    if (goal === 'fs') { const a = SBT.front[pcode(s, SQ.front[0], SQ.front[1])], b = SBT.back[pcode(s, SQ.back[0], SQ.back[1])]; return a < 0 ? b : b < 0 ? a : Math.min(a, b); }
+    return SBT.full[pcode(s, SBE, SBC)];
+  }
+  // Shortest solutions, written as turned (first block on the bottom left): easiest first.
+  function sbSolutions(s, goal, cap, show) {
+    sbBuild();
+    const parts = goal === 'fs' ? ['front', 'back'] : ['full'], raw = [];
+    const opt = sbDist(s, goal); if (opt == null || opt < 0) return { opt: null, sols: [] };
+    for (const part of parts) {
+      const [es, cs] = part === 'full' ? [SBE, SBC] : SQ[part], T = SBT[part];
+      if (T[pcode(s, es, cs)] !== opt) continue;
+      const path = [];
+      const dfs = (st, last) => {
+        if (raw.length >= cap) return;
+        const d = T[pcode(st, es, cs)]; if (d === 0) { raw.push(path.slice()); return; }
+        for (let m = 0; m < SB_NM; m++) {
+          if (!sbFollow(m, last)) continue;
+          const n2 = E.mult(st, SB_MC[m]); if (T[pcode(n2, es, cs)] !== d - 1) continue;
+          path.push(m); dfs(n2, m); path.pop();
+        }
+      };
+      dfs(s, -1);
+    }
+    const COST = [0, 0, 0.3, 0.3], seen = new Set();
+    const sols = raw.map(ms => ({ moves: ms, text: ms.map(m => SB_NAMES[(m / 3) | 0] + ['', '2', "'"][m % 3]).join(' '), cost: ms.reduce((a, m) => a + COST[(m / 3) | 0] + (m % 3 === 1 ? 0.2 : 0), 0) }))
+      .filter(x => !seen.has(x.text) && seen.add(x.text)).sort((a, b) => a.cost - b.cost);
+    return { opt, sols: sols.slice(0, show || sols.length) };
+  }
+  // first square of the second block done (DR plus one pair, lined up with the first block)
+  function sbSquareDone(c) {
+    const n = fbN(c); if (n < 0) return false;
+    const t = norm(c, n), ok = (es, cs) => es.every(p => t.ep[p] === p && !t.eo[p]) && cs.every(p => t.cp[p] === p && !t.co[p]);
+    return ok(SQ.front[0], SQ.front[1]) || ok(SQ.back[0], SQ.back[1]);
+  }
+  // second-block drill states: first block done; for 'lp' also DR and one square (back or front)
+  function sbCase(v, rng) {
+    rng = rng || Math.random;
+    for (;;) {
+      let s;
+      if (v === 'lp') { const back = rng() < 0.5; s = randomState(back ? [5, 6, 7] : [5, 6, 4], back ? [6, 9, 10, 4, 11] : [6, 9, 10, 4, 8], rng); }
+      else s = randomState([5, 6], [6, 9, 10], rng);
+      const d = sbDist(s, v === 'fs' ? 'fs' : 'full');
+      if (d > 0) return s;
+    }
+  }
+
   // ----- states for the drills (all in the block frame) -----
   function randomState(fixC, fixE, rng) {
     rng = rng || Math.random;
@@ -1608,7 +1695,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = api; else 
   function cornersOriented(c) { const n = pairN(c); return n >= 0 && coDone(norm(c, n)); }
 
   const api = { ROTS, FMAP, conj, unconj, rotFor, rotFaces, fbN, sbN, pairN, norm, cornersAUF, stageDone, ocName, permName, OC_ALGS, PERM_ALGS, caseState,
-    stm, describe, fmFor, split, fbBuild, fbReady: () => !!FBT, fbDist, fbSolutions, fbdrDone, fbdrDist, fbdrSolutions, lpCase, randomState, lseScramble, lseCase, cmllCase, frameFor, cmllCaseFor, cornersOriented };
+    stm, describe, fmFor, split, fbBuild, fbReady: () => !!FBT, fbDist, fbSolutions, fbdrDone, fbdrDist, fbdrSolutions, lpCase, randomState, lseScramble, lseCase, cmllCase, frameFor, cmllCaseFor, cornersOriented, sbBuild, sbReady: () => !!SBT, sbDist, sbSolutions, sbSquareDone, sbCase };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.ROUX = api;
 })(typeof self !== 'undefined' ? self : this);
 </script>
@@ -5234,6 +5321,31 @@ function cmCardsHtml(){
 }
 function fbVar(){ return settings.fbVar || 'full'; }
 const FB_VARS = [['full', 'Whole block'], ['lp', 'Last pair'], ['lpdr', 'Last pair + DR']];
+function sbVar(){ return settings.sbVar || 'full'; }
+const SB_VARS = [['full', 'Whole block'], ['fs', 'First square'], ['lp', 'Last pair']];
+// Levels: the length of the shortest solution (M and r count as one move). Pick any of them, or none
+// for the usual mix. The ranges cover nearly every case.
+const LV_RANGE = { 'fb:full': [4, 8], 'fb:lp': [2, 6], 'fb:lpdr': [3, 7], 'sb:full': [6, 12], 'sb:fs': [3, 9], 'sb:lp': [3, 9] };
+function lvKey(){ return rd.kind === 'fb' ? 'fb:' + fbVar() : rd.kind === 'sb' ? 'sb:' + sbVar() : null; }
+function lvSel(key){ settings.rdLv = settings.rdLv || {}; return (settings.rdLv[key || lvKey()] || []).slice(); }
+// a random case whose shortest solution is one of the chosen lengths (or at least minD); gives up
+// after a moment and takes the closest one found
+function pickByLevel(gen, dist, minD){
+  const want = lvSel(), t0 = performance.now(); let best = null;
+  for (let i = 0; i < 20000; i++) {
+    const s = gen(), d = dist(s); if (d == null || d < 0) continue;
+    const off = want.length ? Math.min(...want.map(x => Math.abs(x - d))) : d >= minD ? 0 : minD - d;
+    if (!best || off < best.off) best = { s, d, off };
+    if (off === 0 || performance.now() - t0 > 600) break;
+  }
+  return best;
+}
+function lvRowHtml(){
+  const key = lvKey(); if (!key) return '';
+  const [lo, hi] = LV_RANGE[key], sel = lvSel(key), bs = [];
+  for (let n = lo; n <= hi; n++) bs.push('<button data-lv="' + n + '" aria-pressed="' + sel.includes(n) + '">' + n + '</button>');
+  return '<div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap"><span class="hint">Shortest solution (moves)</span><div class="seg" role="group" aria-label="Level">' + bs.join('') + '<button data-lv="any" aria-pressed="' + !sel.length + '">Any</button></div></div>';
+}
 function blockSelectHtml(id){
   const r = rdRot();
   return '<div class="row"><label class="hint" for="' + id + '">My first block</label><select id="' + id + '">' + ROUX.ROTS.map((_, i) => { const c = rotColors(i); return [i, c.bottom + ' bottom, ' + c.left + ' on the left']; }).sort((a, b) => a[1] < b[1] ? -1 : 1).map(([i, t]) => '<option value="' + i + '"' + (i === r ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></div>';
@@ -5243,23 +5355,21 @@ function rdNew(){
   if (!solverReady) return;
   const go = () => {
     const r = rdRot(); let G;
+    rd.lv = null;
     if (rd.kind === 'fb' && fbVar() !== 'full') {
       const sq = settings.fbSq || 'back', dr = fbVar() === 'lpdr';
-      for (let i = 0; i < 200; i++) {
-        G = ROUX.lpCase(sq === 'either' ? Math.random() < 0.5 : sq === 'back');
-        const d = dr ? ROUX.fbdrDist(G, 500) : ROUX.fbDist(G);
-        if (d != null && d >= (dr ? 4 : 3)) break;
-      }
+      const b = pickByLevel(() => ROUX.lpCase(sq === 'either' ? Math.random() < 0.5 : sq === 'back'), (x) => dr ? ROUX.fbdrDist(x, 300) : ROUX.fbDist(x), dr ? 4 : 3);
+      G = b.s; rd.lv = b.d;
     }
-    else if (rd.kind === 'fb') { do { G = ROUX.randomState([], []); } while (ROUX.fbDist(G) < 4); }
-    else if (rd.kind === 'sb') { do { G = ROUX.randomState([5, 6], [6, 9, 10]); } while (ROUX.pairN(G) >= 0); }
+    else if (rd.kind === 'fb') { const b = pickByLevel(() => ROUX.randomState([], []), ROUX.fbDist, 4); G = b.s; rd.lv = b.d; }
+    else if (rd.kind === 'sb') { const v = sbVar(), b = pickByLevel(() => ROUX.sbCase(v), (x) => ROUX.sbDist(x, v === 'fs' ? 'fs' : 'full'), v === 'full' ? 7 : 3); G = b.s; rd.lv = b.d; }
     else if (rd.kind === 'cmll') {
       const prev = rd.card, want = rd.forceCard; rd.card = null; rd.forceCard = null;
       if (cmMode() === 'cards') { const c = want ? cmCard(want) : cmPick(prev); if (c) { G = ROUX.cmllCaseFor(c.w, c.n); if (G) rd.card = c.id; } }
       if (!G) G = ROUX.cmllCase();
     }
     else G = ROUX.lseCase();
-    rd.target = ROUX.unconj(G, r); rd.attempt = 1; rd.peek = false; if (rd.kind !== 'cmll') rd.card = null; rd.v = rd.kind === 'fb' ? fbVar() : undefined;
+    rd.target = ROUX.unconj(G, r); rd.attempt = 1; rd.peek = false; if (rd.kind !== 'cmll') rd.card = null; rd.v = rd.kind === 'fb' ? fbVar() : rd.kind === 'sb' ? sbVar() : undefined;
     rdArm();
   };
   if (rd.kind === 'fb') withFB($('rdBox'), go); else go();
@@ -5291,7 +5401,7 @@ function rdTurn(m, f, b, raw){
   if (rd.phase !== 'running') return;
   rd.moves.push({ m, raw });
   if (rd.kind === 'cmll' && rd.card) cmTrack(m);
-  const done = rd.kind === 'lse' ? E.equal(cur, E.solved()) : rd.kind === 'fb' && rd.v === 'lpdr' ? ROUX.fbdrDone(ROUX.conj(cur, rdRot())) : rd.kind === 'cmll' && rd.card && rd.card.startsWith('oc:') ? ROUX.cornersOriented(ROUX.conj(cur, rdRot())) : ROUX.stageDone(rd.kind, ROUX.conj(cur, rdRot()));
+  const done = rd.kind === 'lse' ? E.equal(cur, E.solved()) : rd.kind === 'fb' && rd.v === 'lpdr' ? ROUX.fbdrDone(ROUX.conj(cur, rdRot())) : rd.kind === 'sb' && rd.v === 'fs' ? ROUX.sbSquareDone(ROUX.conj(cur, rdRot())) : rd.kind === 'cmll' && rd.card && rd.card.startsWith('oc:') ? ROUX.cornersOriented(ROUX.conj(cur, rdRot())) : ROUX.stageDone(rd.kind, ROUX.conj(cur, rdRot()));
   if (done) rdFinish();
   else if (rd.kind === 'cmll' && rd.card) renderRd();
 }
@@ -5312,6 +5422,7 @@ function rdFinish(){
       else { L.opt = ROUX.fbDist(frame); L.sols = ROUX.fbSolutions(frame, 300, 4); }
       L.text = ROUX.describe(moves, r, {}).map(t => t.txt).join(' ');
     } else if (rd.kind === 'sb') {
+      if (ROUX.fbN(frame) === 0) { const x = ROUX.sbSolutions(frame, rd.v === 'fs' ? 'fs' : 'full', 80, 4); if (x.opt != null) { L.opt = x.opt; L.sols = x.sols; } }
       L.text = ROUX.describe(moves, r, { anchorFrom: 0, fm0: ROUX.fmFor(ROUX.fbN(frame)) }).map(t => t.txt).join(' ');
     } else {
       const sp = ROUX.split(rd.start, moves, { rot: r });
@@ -5343,7 +5454,9 @@ function rdResultHtml(){
   if (L.text) h += '<p class="hint" style="margin:8px 0 2px">Your moves</p><div class="scr small">' + L.text.split(' ').map(t => '<span class="tok">' + esc(t) + '</span>').join('') + '</div>';
   if (L.sols && L.sols.length) {
     const c = rotColors(rdRot());
-    h += '<p class="hint" style="margin:8px 0 2px">Shortest ' + (L.v === 'lpdr' ? 'ways to finish the block and the DR edge' : L.v === 'lp' ? 'ways to finish the block' : 'first blocks') + ' (' + L.opt + ' moves), starting with ' + c.bottom + ' on the bottom and ' + c.front + ' in front</p>' +
+    if (L.kind === 'sb') h += '<p class="hint" style="margin:8px 0 2px">Shortest ways to ' + (L.v === 'fs' ? 'build the first square (DR and one pair)' : L.v === 'lp' ? 'finish the second block' : 'build the second block') + ' (' + L.opt + ' moves), with ' + c.bottom + ' on the bottom and ' + c.left + ' on the left</p>' +
+      solsHtml(L.sols) + '<p class="hint">Only U, R, M and r, so the first block never moves. M and r count as one move each.</p>';
+    else h += '<p class="hint" style="margin:8px 0 2px">Shortest ' + (L.v === 'lpdr' ? 'ways to finish the block and the DR edge' : L.v === 'lp' ? 'ways to finish the block' : 'first blocks') + ' (' + L.opt + ' moves), starting with ' + c.bottom + ' on the bottom and ' + c.front + ' in front</p>' +
       solsHtml(L.sols) + '<p class="hint">' + SOLS_NOTE + '</p>';
   }
   return h + '<div class="row" style="margin-top:8px"><button class="mini" data-rdagain="1">Try this one again</button></div></div>';
@@ -5360,12 +5473,16 @@ const RD_HINT = {
   lp: 'The first square is already built on the bottom left. Plan the last pair (a corner and its edge) and put it in without stopping.',
   lpdr: 'The first square is built. Finish the block with the last pair and also put the DR edge (bottom right) in place: the start of the second block.',
   sb: 'The first block is done. Build the second one on the right using only R, r, M and U turns, so the first block never moves.',
+  sbfs: 'The first block is done. Build one square of the second block: the DR edge (bottom right) with the front or the back pair. Use R, r, M and U.',
+  sblp: 'The first block, the DR edge and one square of the second block are done. Put in the last pair with R, r, M and U.',
   cmll: 'Both blocks are done. Solve the four top corners; the edges do not matter yet.',
   lse: 'Blocks and corners are done. Finish with M and U turns only: orient the six edges, place the left and right ones, then the last four.',
 };
 function rdHint(){
   if (rd.kind === 'cmll' && rd.card) return rd.card.startsWith('oc:') ? 'Both blocks are done. Twist the four top corners so the top colour faces up; the clock stops as soon as they all do.' : 'Both blocks are done and the corners already show the top colour. Swap them so each side matches; any U turn at the end is fine.';
-  return rd.kind === 'fb' && fbVar() !== 'full' ? RD_HINT[fbVar()] : RD_HINT[rd.kind];
+  const lv = rd.lv != null && (rd.kind === 'fb' || rd.kind === 'sb') ? ' Shortest solution: ' + rd.lv + ' moves.' : '';
+  if (rd.kind === 'sb' && sbVar() !== 'full') return RD_HINT['sb' + sbVar()] + lv;
+  return (rd.kind === 'fb' && fbVar() !== 'full' ? RD_HINT[fbVar()] : RD_HINT[rd.kind]) + lv;
 }
 function renderRd(){
   const box = $('rdBox'); if (!box) return;
@@ -5376,6 +5493,8 @@ function renderRd(){
     h += '<div class="row" style="margin-top:8px"><div class="seg" role="group" aria-label="What to build">' + FB_VARS.map(([k, n]) => '<button data-fbvar="' + k + '" aria-pressed="' + (k === v) + '">' + n + '</button>').join('') + '</div>' +
       (v !== 'full' ? '<label class="hint" for="rdSq">Square built</label><select id="rdSq">' + [['back', 'At the back'], ['front', 'At the front'], ['either', 'Either']].map(([k, n]) => '<option value="' + k + '"' + (k === sq ? ' selected' : '') + '>' + n + '</option>').join('') + '</select>' : '') + '</div>';
   }
+  if (rd.kind === 'sb') h += '<div class="row" style="margin-top:8px"><div class="seg" role="group" aria-label="What to build">' + SB_VARS.map(([k, n]) => '<button data-sbvar="' + k + '" aria-pressed="' + (k === sbVar()) + '">' + n + '</button>').join('') + '</div></div>';
+  h += lvRowHtml();
   if (rd.kind === 'cmll') h += '<div class="row" style="margin-top:8px"><div class="seg" role="group" aria-label="Corner cases">' + [['cards', 'Cards'], ['mix', 'Random cases']].map(([k, n]) => '<button data-cmmode="' + k + '" aria-pressed="' + (k === cmMode()) + '">' + n + '</button>').join('') + '</div></div>';
   const cc = rd.kind === 'cmll' && rd.card && rd.phase !== 'nocube' ? cmCard(rd.card) : null;
   if (cc) {
@@ -5392,7 +5511,7 @@ function renderRd(){
   } else if (rd.phase === 'ready' || rd.phase === 'running') {
     const c = rotColors(r);
     h += '<p class="eyebrow" style="margin-top:12px">' + (rd.kind === 'fb' ? (rd.phase === 'ready' ? 'Plan it, then turn' : rd.v === 'lpdr' ? 'Finish the block and DR' : rd.v === 'lp' ? 'Finish the block' : 'Build the block') : 'Go') + '</p><div class="timer' + (rd.phase === 'ready' && rd.kind === 'fb' ? ' ready' : '') + '" id="rdTime">0</div>' +
-      '<p class="hint">Hold ' + swc(c.bottom) + c.bottom + ' on the bottom and ' + swc(c.left) + c.left + ' on the left. ' + (rd.kind === 'fb' ? 'The number counts your planning time; the timer starts on your first turn.' : 'The clock is already running, so recognition counts.') + '</p>';
+      '<p class="hint">Hold ' + swc(c.bottom) + c.bottom + ' on the bottom and ' + swc(c.left) + c.left + ' on the left. ' + (rd.kind === 'fb' ? 'The number counts your planning time; the timer starts on your first turn.' : 'The clock is already running, so recognition counts.') + (rd.lv != null && (rd.kind === 'fb' || rd.kind === 'sb') ? ' Shortest solution: <b>' + rd.lv + ' moves</b>.' : '') + '</p>';
   }
   h += '<div class="row" style="margin-top:8px"><button class="mini" data-rdnew="1">New scramble</button></div>' + rdResultHtml() + (rd.kind === 'cmll' && cmMode() === 'cards' ? cmCardsHtml() : rdRefHtml());
   box.innerHTML = h + cubeStatusHtml();
@@ -5402,11 +5521,11 @@ function renderRdStats(){
   const el = $('rdStats'); if (!el) return;
   const av = (a) => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
   let h = '<p class="eyebrow">Your drills · first tries, last 30 of each</p><div class="tablewrap"><table><thead><tr><th>Step</th><th>Runs</th><th>Time</th><th>Look</th><th>Moves</th><th>Pauses</th></tr></thead><tbody>';
-  const kinds = [['fb', 'full', 'First block'], ['fb', 'lp', 'FB last pair'], ['fb', 'lpdr', 'FB last pair + DR']].concat(RD_KINDS.slice(1).map(([k, n]) => [k, null, n]));
+  const kinds = [['fb', 'full', 'First block'], ['fb', 'lp', 'FB last pair'], ['fb', 'lpdr', 'FB last pair + DR'], ['sb', 'full', 'Second block'], ['sb', 'fs', 'SB first square'], ['sb', 'lp', 'SB last pair']].concat(RD_KINDS.slice(2).map(([k, n]) => [k, null, n]));
   for (const [k, v, n] of kinds) {
     const xs = rdLog.filter(x => x.k === k && x.first !== false && (!v || (x.v || 'full') === v)).slice(-30);
     if (v && v !== 'full' && !xs.length) continue;
-    h += '<tr><td style="font-family:var(--sans)">' + n + '</td><td>' + xs.length + '</td>' + (xs.length ? '<td>' + fmt(av(xs.map(x => x.t))) + '</td><td>' + fmt(av(xs.map(x => x.look))) + '</td><td>' + av(xs.map(x => x.stm)).toFixed(1) + (k === 'fb' ? ' <span class="hint">(+' + av(xs.filter(x => x.opt != null).map(x => x.stm - x.opt)).toFixed(1) + ' over shortest)</span>' : '') + '</td><td>' + av(xs.map(x => x.pauses)).toFixed(1) + '</td>' : '<td colspan="4"></td>') + '</tr>';
+    h += '<tr><td style="font-family:var(--sans)">' + n + '</td><td>' + xs.length + '</td>' + (xs.length ? '<td>' + fmt(av(xs.map(x => x.t))) + '</td><td>' + fmt(av(xs.map(x => x.look))) + '</td><td>' + av(xs.map(x => x.stm)).toFixed(1) + ((k === 'fb' || k === 'sb') && xs.some(x => x.opt != null) ? ' <span class="hint">(+' + av(xs.filter(x => x.opt != null).map(x => x.stm - x.opt)).toFixed(1) + ' over shortest)</span>' : '') + '</td><td>' + av(xs.map(x => x.pauses)).toFixed(1) + '</td>' : '<td colspan="4"></td>') + '</tr>';
   }
   h += '</tbody></table></div>';
   const cm = rdLog.filter(x => x.k === 'cmll' && x.c).slice(-60), by = {};
@@ -5442,6 +5561,8 @@ $('tabRxd').addEventListener('click', (e) => {
   const cmm = e.target.closest('[data-cmmode]'); if (cmm) { settings.cmllMode = cmm.dataset.cmmode; store.set('settings', settings); if (cmm.dataset.cmmode === 'cards') { setTab('cmllc'); return; } rd.last = null; rdNew(); return; }
   if (e.target.closest('[data-cmpeek]')) { rd.peek = true; renderRd(); return; }
   const fv = e.target.closest('[data-fbvar]'); if (fv) { settings.fbVar = fv.dataset.fbvar; store.set('settings', settings); rd.last = null; rdNew(); return; }
+  const sv = e.target.closest('[data-sbvar]'); if (sv) { settings.sbVar = sv.dataset.sbvar; store.set('settings', settings); rd.last = null; rdNew(); return; }
+  const lb = e.target.closest('[data-lv]'); if (lb) { const key = lvKey(); if (!key) return; let sel = lvSel(key); if (lb.dataset.lv === 'any') sel = []; else { const n = +lb.dataset.lv; sel = sel.includes(n) ? sel.filter(x => x !== n) : sel.concat(n).sort((a, b) => a - b); } settings.rdLv[key] = sel; store.set('settings', settings); rdNew(); return; }
   const k = e.target.closest('[data-rdkind]'); if (k) { rd.kind = k.dataset.rdkind; settings.rdKind = rd.kind; store.set('settings', settings); rdNew(); return; }
   if (e.target.closest('[data-rdnew]')) { rdNew(); return; }
   if (e.target.closest('[data-rdagain]')) { rdAgain(); return; }
