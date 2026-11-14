@@ -2704,7 +2704,7 @@ function slowness(c){
   const others = LLCARDS.filter(x => x.set === c.set && stat(x.id).known).map(x => avg(recentTimes(x.id))).filter(x => x != null).sort((p, q) => p - q);
   let s = a == null ? 1.5 : others.length >= 2 ? a / others[others.length >> 1] : 1;
   // OLL & PLL: how long the case takes inside your timed solves, next to your other cases
-  if (c.set === 'OLL' || c.set === 'PLL') {
+  if (c.set !== 'F2L') {
     const me = solveTime(c);
     if (me != null) {
       const ref = LLCARDS.filter(x => x.set === c.set).map(solveTime).filter(x => x != null).sort((p, q) => p - q);
@@ -3404,7 +3404,7 @@ function renderDeck(){
     const colr = ratio == null ? 'var(--line)' : ratio > 1.25 ? 'var(--bad)' : ratio > 0.9 ? 'var(--warn)' : 'var(--good)';
     const mr = st.known ? mistakeRate(c) : null;
     let meta = !st.known ? 'not learned' : a == null ? 'no times yet' : fmt(a) + ' s' + (mr ? ' · <b style="color:var(--warn)">' + Math.round(mr * 100) + '% slips</b>' : '');
-    if (c.set === 'OLL' || c.set === 'PLL') { const ss = solveStats(c); if (ss) meta += (st.known ? ' · ' : ' · ') + 'in solves ' + fmt(ss.t) + ' s'; }
+    if (c.set !== 'F2L') { const ss = solveStats(c); if (ss) meta += (st.known ? ' · ' : ' · ') + 'in solves ' + fmt(ss.t) + ' s'; }
     if (c.set === 'F2L') { const fs = f2lSeenStats(c); if (fs) meta = 'seen ' + fs.n + '×' + (fs.extra != null ? ' · <b style="color:' + (fs.extra > 1.5 ? 'var(--bad)' : fs.extra > 0.3 ? 'var(--warn)' : 'var(--good)') + '">' + (fs.extra > 0 ? '+' : '') + fs.extra.toFixed(1) + '</b>' : ''); }
     return '<div class="tile' + (st.known || c.set === 'F2L' ? '' : ' unknown') + (ll.card && ll.card.id === c.id ? ' cur' : '') + (drillPicking() && drillSel().includes(c.id) ? ' insel' : '') + '" data-card="' + c.id + '" role="button" tabindex="0" title="' + esc(tileTip(c)) + '">' +
       '<label title="I know this case"><input type="checkbox" data-known="' + c.id + '"' + (st.known ? ' checked' : '') + ' aria-label="I know ' + esc(c.name) + '"></label>' +
@@ -3525,7 +3525,7 @@ function tileTip(c){
     const fs = f2lSeenStats(c);
     return c.name + ' · ' + c.group + ': ' + cardAlg(c) + (fs ? ' · in your solves: ' + fs.n + '×, ' + (fs.extra != null ? (fs.extra > 0 ? '+' : '') + fs.extra.toFixed(1) + ' moves vs the alg, ' + Math.round(fs.clean * 100) + '% as short as the alg' : '') + (fs.t != null ? ', ' + fmt(fs.t) + ' s' : '') : ' · not seen in your solves yet');
   }
-  if (c.set === 'CMLL') return c.name + ' (' + c.group.toLowerCase() + '): ' + cardAlg(c) + ' · comes up ' + freqText(c);
+  if (c.set === 'CMLL') { const ss = solveStats(c); return c.name + ' (' + c.group.toLowerCase() + '): ' + cardAlg(c) + ' · comes up ' + freqText(c) + (ss ? ' · in your Roux solves: ' + ss.n + '×, look ' + fmt(ss.look) + ' s + turn ' + fmt(ss.turn) + ' s' : ''); }
   const ss = solveStats(c);
   return c.name + ': ' + cardAlg(c) + ' · comes up ' + freqText(c) + (ss ? ' · in your timed solves: ' + ss.n + '×, look ' + fmt(ss.look) + ' s + turn ' + fmt(ss.turn) + ' s' : seenInSolves(c) ? ' · seen ' + seenInSolves(c) + '× in your timed solves' : '');
 }
@@ -3811,6 +3811,19 @@ function recordLLFromSolve(rec, ll){
     st.solves = st.solves || [];
     if (st.solves.some(y => y.sid === rec.id && y.s === x.s)) continue;
     st.solves.push({ sid: rec.id, s: x.s, look: x.look, turn: x.turn, mv: x.mv, d: new Date(rec.date).getTime(), h: (rec.hinted || []).includes(x.card) ? 1 : undefined });
+    if (st.solves.length > 40) st.solves.splice(0, st.solves.length - 40);
+  }
+}
+// Feed the 2-look CMLL steps of a Roux solve into the CMLL cards: look and turn time per case.
+function recordCMLLFromSolve(rec, sp){
+  try { sp = sp || (rec.start && rec.moves ? ROUX.split(rec.start, rec.moves) : null); } catch (e) { return; }
+  const cm = sp && sp.steps ? sp.steps.find(x => x.name === 'CMLL') : null; if (!cm) return;
+  const parts = cm.sub && cm.sub.length ? cm.sub.map(x => [/^Orient/.test(x.name) ? 'oc' : 'cp', x]) : /swap$/.test(cm.case || '') ? [['cp', cm]] : [];
+  for (const [w, x] of parts) {
+    const c = LLCARDS.find(y => y.set === 'CMLL' && y.w === w && y.key.toLowerCase() === String(x.case || '').toLowerCase()); if (!c) continue;
+    const st = stat(c.id); st.solves = st.solves || [];
+    if (st.solves.some(y => y.sid === rec.id)) continue;
+    st.solves.push({ sid: rec.id, s: w, look: Math.round(x.look), turn: Math.round(x.t - x.look), mv: x.mv, d: new Date(rec.date).getTime() });
     if (st.solves.length > 40) st.solves.splice(0, st.solves.length - 40);
   }
 }
@@ -5002,6 +5015,7 @@ function rxFinish(){
     rec.time = Math.round(times[times.length - 1]); rec.start = rx.start; rec.moves = mv.map((x, i) => [x.m, Math.round(times[i])]);
     try {
       const sp = ROUX.split(rec.start, rec.moves);
+      try { recordCMLLFromSolve(rec, sp); saveLL(); } catch (e) {}
       rec.split = sp.steps.map(s => ({ n: s.name, t: Math.round(s.t), look: Math.round(s.look), st: Math.round(s.stop), mv: s.mv, c: s.case || undefined }));
       rec.stm = ROUX.stm(rec.moves.map(x => x[0]));
       if (sp.steps.length && ROUX.fbReady()) rec.fbOpt = ROUX.fbDist(ROUX.conj(rec.start, sp.r));
@@ -5551,6 +5565,10 @@ if (!settings.cmllMigrated) {
     if (c && !stat(c.id).known) stat(c.id).known = true;
   }
   settings.cmllMigrated = true; store.set('settings', settings); saveLL();
+}
+// once: the Roux solves saved before CMLL cases were recorded on the cards
+if (!settings.cmllBackfilled) {
+  setTimeout(() => { try { for (const r of rxSolves.slice(0, 200)) if (!r.lost && r.start && r.moves) recordCMLLFromSolve(r); saveLL(); settings.cmllBackfilled = true; store.set('settings', settings); if (activeTab === 'cmllc') renderDeck(); } catch (e) {} }, 1500);
 }
 document.addEventListener('toggle', (e) => { if (e.target.classList && e.target.classList.contains('cubestat')) { settings.statusOpen = e.target.open; store.set('settings', settings); if (e.target.open) renderNet(); } }, true);
 $('drillBox').addEventListener('click', (e) => {
