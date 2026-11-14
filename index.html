@@ -2142,6 +2142,7 @@ function renderNet(){
     }
   }
   $('net').innerHTML = html;
+  document.querySelectorAll('.net.live').forEach(el => { el.innerHTML = html; });
 }
 function renderSlotChips(){
   const done = E.crossSolved(cur) ? E.solvedSlots(cur) : [];
@@ -2503,7 +2504,20 @@ function fillMissing(fl, fs){
   for (const [f, a] of found) { lastMoveSerial = (lastMoveSerial + 1) & 255; handleTurn(f, a, { localTimestamp: performance.now(), cubeTimestamp: null, recovered: true }); }
   return true;
 }
+// Last few hundred Bluetooth events, to copy and send when tracking goes wrong.
+const btLog = [];
+function btNote(x){ btLog.push(Object.assign({ t: Math.round(performance.now()) }, x)); if (btLog.length > 400) btLog.splice(0, btLog.length - 400); }
+let forceSync = false;
+// Ask the cube for its state and take it as it is (ignores the move counter).
+function resyncNow(){
+  if (!conn) { toast('No cube connected.'); return; }
+  forceSync = true; syncRetries = 0; clearTimeout(syncRetryT); clearTimeout(idleSyncT);
+  syncRequestAt = moveCounter; btNote({ ev: 'resync-button' });
+  conn.sendCubeCommand({ type: 'REQUEST_FACELETS' }).catch(() => {});
+  setTimeout(() => { if (forceSync) { forceSync = false; toast('The cube did not answer. Turn a face to wake it and try again.'); } }, 3000);
+}
 function onCubeEvent(ev){
+  if (ev.type === 'MOVE' || ev.type === 'FACELETS') btNote({ ev: ev.type, s: ev.serial, m: ev.move, last: lastMoveSerial });
   if (ev.type === 'MOVE') {
     const face = CUBE_TO_USER[settings.cross][ev.move[0]];
     if (!macConfirmed) return;
@@ -2512,7 +2526,7 @@ function onCubeEvent(ev){
       const sr = ev.serial & 255;
       if (lastMoveSerial != null) {
         gap = serialGap(sr, lastMoveSerial);
-        if (gap === 0 || gap > 128) return; // already counted (arrived late, after a re-sync from the cube's state)
+        if (gap === 0 || gap > 128) { btNote({ ev: 'drop', s: sr, last: lastMoveSerial }); return; } // already counted (arrived late, after a re-sync from the cube's state)
       }
       lastMoveSerial = sr;
     }
@@ -2524,6 +2538,13 @@ function onCubeEvent(ev){
     if (!validFacelets(ev)) return;
     macConfirmed = true;
     if (!solverReady) return;
+    if (forceSync) { forceSync = false; needInitialSync = false; syncRequestAt = -1; syncRetries = 0;
+      let st; try { st = faceletsToUser(ev.facelets); } catch (e) { return; }
+      if (ev.serial != null) lastMoveSerial = ev.serial & 255;
+      btNote({ ev: 'resync', same: E.equal(st, cur) });
+      if (E.equal(st, cur)) { toast('The app already matches your cube.'); renderNet(); return; }
+      cur = st; toast('Re-synced from the cube.'); onResync(); renderNet(); renderSlotChips(); return;
+    }
     if (!needInitialSync && syncRequestAt !== moveCounter) return; // stale answer
     const fs = ev.serial != null ? ev.serial & 255 : null;
     if (!needInitialSync && fs != null && lastMoveSerial != null && fs !== lastMoveSerial && serialGap(fs, lastMoveSerial) < 128 && syncRetries < 6) {
@@ -2540,7 +2561,7 @@ function onCubeEvent(ev){
     if (fs != null) lastMoveSerial = fs; // the state now includes every turn up to here
     if (!E.equal(st, cur)) {
       cur = st;
-      if (!initial) toast('Some turns were missed over Bluetooth. Re-synced from the cube.');
+      if (!initial) { toast('Some turns were missed over Bluetooth. Re-synced from the cube.'); btNote({ ev: 'auto-resync' }); }
       onResync();
       renderNet(); renderSlotChips();
     }
@@ -4991,6 +5012,22 @@ function rxDetailHtml(){
   return h;
 }
 let rxFbSols = null;
+// What the app thinks the cube looks like, with ways out when it is wrong.
+function cubeStatusHtml(){
+  if (!conn) return '';
+  return '<details class="cubestat"' + (settings.statusOpen ? ' open' : '') + '><summary>Cube status</summary>' +
+    '<div class="netbox" style="margin-top:8px"><div><p class="eyebrow">What the app thinks your cube looks like</p><div class="net live" aria-label="Tracked cube"></div>' +
+    '<p class="hint">' + esc(SCHEME[settings.cross].D) + ' on the bottom, ' + esc(SCHEME[settings.cross].F) + ' in front. If it doesn\'t match your cube, re-sync.</p></div></div>' +
+    '<div class="row"><button data-resync="1">Re-sync from cube</button><button data-cubesolved="1">My cube is solved</button><button data-btlog="1">Copy Bluetooth log</button></div></details>';
+}
+// The cube is solved in your hands but the app thinks otherwise: trust the cube.
+function markSolved(){
+  btNote({ ev: 'solved-button' });
+  cur = E.solved();
+  if (activeTab === 'roux' && rx.phase === 'running') { rx.lost = true; rxFinish(); toast('Saved with the time of your last turn. Splits need every turn, so this one has none.'); }
+  else onResync();
+  renderNet(); renderSlotChips();
+}
 function renderRx(){
   const box = $('rxBox'); if (!box) return;
   let h = '';
@@ -5004,7 +5041,8 @@ function renderRx(){
   else if (rx.phase === 'running') h = '<p class="eyebrow">Solving</p><div class="timer" id="rxTime">0.00</div><div class="row"><button data-rxstop="1">Stop without saving</button></div>';
   else if (rx.phase === 'done') h = '<p class="eyebrow">Solved</p><div class="timer">' + (rxSolves[0] ? fmtT(rxSolves[0].time) : '') + '</div>';
   else h = '<p class="eyebrow">Roux timer</p><p class="phase-title">Loading…</p>';
-  box.innerHTML = h + '<div id="rxDetail">' + rxDetailHtml() + '</div>';
+  box.innerHTML = h + cubeStatusHtml() + '<div id="rxDetail">' + rxDetailHtml() + '</div>';
+  renderNet();
   if (rx.phase === 'inspect' || rx.phase === 'running') rxLoop();
 }
 function renderRxStats(){
@@ -5268,7 +5306,8 @@ function renderRd(){
       '<p class="hint">Hold ' + swc(c.bottom) + c.bottom + ' on the bottom and ' + swc(c.left) + c.left + ' on the left. ' + (rd.kind === 'fb' ? 'The number counts your planning time; the timer starts on your first turn.' : 'The clock is already running, so recognition counts.') + '</p>';
   }
   h += '<div class="row" style="margin-top:8px"><button class="mini" data-rdnew="1">New scramble</button></div>' + rdResultHtml() + (rd.kind === 'cmll' && cmMode() === 'cards' ? cmCardsHtml() : rdRefHtml());
-  box.innerHTML = h;
+  box.innerHTML = h + cubeStatusHtml();
+  renderNet();
 }
 function renderRdStats(){
   const el = $('rdStats'); if (!el) return;
@@ -5292,6 +5331,11 @@ function renderRdStats(){
 // ---------- wiring ----------
 $('btnConnect').onclick = connect;
 document.querySelectorAll('[data-method]').forEach(b => b.onclick = () => { settings.method = b.dataset.method; store.set('settings', settings); setTab(settings.method === 'roux' ? 'roux' : 'timer'); });
+document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-resync]')) { resyncNow(); return; }
+  if (e.target.closest('[data-cubesolved]')) { markSolved(); return; }
+  if (e.target.closest('[data-btlog]')) { const txt = JSON.stringify({ app: 'slotwise', tab: activeTab, rx: rx.phase, rd: rd.phase, log: btLog }); (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => toast('Bluetooth log copied. Paste it to me.'), () => { window.prompt('Copy this log:', txt); }); return; }
+});
 $('tabRoux').addEventListener('click', (e) => {
   if (e.target.closest('[data-rxstop]')) { cancelAnimationFrame(rx.raf); toast('Solve stopped. It wasn\'t saved.'); rxNew(); return; }
   const db = e.target.closest('[data-rxdel]');
@@ -5418,6 +5462,7 @@ document.querySelectorAll('[data-llmode]').forEach(b => b.onclick = () => {
 $('llNext').onclick = nextCard;
 $('llNew').onclick = () => { ll.drill = null; newCard(); };
 $('drillBox').addEventListener('toggle', () => renderDeck());
+document.addEventListener('toggle', (e) => { if (e.target.classList && e.target.classList.contains('cubestat')) { settings.statusOpen = e.target.open; store.set('settings', settings); if (e.target.open) renderNet(); } }, true);
 $('drillBox').addEventListener('click', (e) => {
   const g = e.target.closest('[data-dgroup]'); if (g) { drillToggle(drillGroups[+g.dataset.dgroup][1]); return; }
   if (e.target.closest('#drillClear')) { drillSetSel([]); renderDeck(); return; }
