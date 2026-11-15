@@ -1696,6 +1696,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = api; else 
     }
     return -1;
   }
+  // a block-frame state with the first block built, tilted with x so the block is home (or null)
+  function fbView(c) { let t = c; for (let q = 0; q < 4; q++) { if (home(t, FBE, FBC)) return t; t = tiltX(t); } return null; }
   function lseDist(c, goal) { lseBuild(); const x = lseView(c); return x < 0 ? null : LSET[goal || 'full'][x]; }
   function lseDone(c, goal) { return lseDist(c, goal) === 0; }
   function lseSolutions(c, goal, cap, show) {
@@ -1799,7 +1801,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = api; else 
   function cornersOriented(c) { const n = pairN(c); return n >= 0 && coDone(norm(c, n)); }
 
   const api = { ROTS, FMAP, conj, unconj, rotFor, rotFaces, fbN, sbN, pairN, norm, cornersAUF, stageDone, ocName, permName, OC_ALGS, PERM_ALGS, caseState,
-    stm, describe, fmFor, split, fbBuild, fbReady: () => !!FBT, fbDist, fbSolutions, fbdrDone, fbdrDist, fbdrSolutions, lpCase, randomState, lseScramble, lseCase, cmllCase, frameFor, cmllCaseFor, cmllCaseFromAlg, cmllKey, cornersOriented, sbBuild, sbReady: () => !!SBT, sbDist, sbSolutions, sbSquareDone, sbCase, lseBuild, lseReady: () => !!LSET, lseDist, lseDone, lseSolutions };
+    stm, describe, fmFor, split, fbBuild, fbReady: () => !!FBT, fbDist, fbSolutions, fbdrDone, fbdrDist, fbdrSolutions, lpCase, randomState, lseScramble, lseCase, cmllCase, frameFor, cmllCaseFor, cmllCaseFromAlg, cmllKey, cornersOriented, sbBuild, sbReady: () => !!SBT, sbDist, sbSolutions, sbSquareDone, sbCase, lseBuild, lseReady: () => !!LSET, lseDist, lseDone, lseSolutions, fbView };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.ROUX = api;
 })(typeof self !== 'undefined' ? self : this);
 </script>
@@ -3950,7 +3952,7 @@ function setTab(t){
   else if (t === 'plan') { renderPlan(); }
   else if (t === 'cross') { if (cx.target && cx.phase === 'idle' && cx.attempt > 1) cxArm(); else cxNewScramble(); renderCrossStats(); }
   else if (t === 'tricks') { if (dr.phase === 'idle' || dr.phase === 'done') drillArm(); else renderTricks(); }
-  else if (t === 'roux') { withFB($('rxBox'), () => { if (activeTab === 'roux') rxNew(); }); renderRxStats(); }
+  else if (t === 'roux') { withFB($('rxBox'), () => { if (activeTab !== 'roux') return; if (rxIsSlow()) withLSE($('rxBox'), () => { if (activeTab === 'roux') rxNew(); }); else rxNew(); }); renderRxStats(); }
   else if (t === 'rxd') { rdNew(); renderRdStats(); }
   else if (solverReady) newScramble();
   try { sessionStorage.setItem('slotwise.tab', t); } catch (e) {}
@@ -5242,6 +5244,10 @@ window.__cx = { get cx(){ return cx; }, CX, get log(){ return crossLog; } };
 // the pieces alone, in whatever orientation and with whatever block colours you use.
 let rxSolves = store.get('rouxSolves', []);
 let rdLog = store.get('rouxDrills', []);
+// slow solves: fewest moves, no clock pressure; kept apart from the timed solves
+let rxSlow = store.get('rouxSlow', []);
+function rxSlowSave(){ if (rxSlow.length > 1000) rxSlow.length = 1000; store.set('rouxSlow', rxSlow); }
+function rxIsSlow(){ return !!settings.rxSlow; }
 const rx = { phase: 'idle', target: null, rem: [], scr: '', start: null, moves: [], t0: 0, inspStart: 0, raf: 0, viewId: rxSolves[0] ? rxSolves[0].id : null, lost: false, cache: null, justDone: false };
 const rd = { kind: settings.rdKind || 'fb', phase: 'idle', target: null, rem: [], start: null, moves: [], t0: 0, raf: 0, last: null };
 const TAB_METHOD = { plan: 'cfop', f2l: 'cfop', ll: 'cfop', f2lc: 'cfop', cmllc: 'roux', cross: 'cfop', timer: 'cfop', roux: 'roux', rxd: 'roux', tricks: 'both', drills: 'both' };
@@ -5294,7 +5300,7 @@ function rxLoop(){
   cancelAnimationFrame(rx.raf);
   const step = () => {
     const el = $('rxTime'); if (!el) return;
-    if (rx.phase === 'inspect') { if (settings.inspection) { const left = INSPECT_MS - (performance.now() - rx.inspStart); el.textContent = left > 0 ? Math.ceil(left / 1000) : '0'; el.className = 'timer' + (left < 3000 ? ' warn' : ''); } }
+    if (rx.phase === 'inspect') { if (settings.inspection && !rxIsSlow()) { const left = INSPECT_MS - (performance.now() - rx.inspStart); el.textContent = left > 0 ? Math.ceil(left / 1000) : '0'; el.className = 'timer' + (left < 3000 ? ' warn' : ''); } }
     else if (rx.phase === 'running') { el.textContent = fmtT(performance.now() - rx.t0); el.className = 'timer'; }
     else return;
     rx.raf = requestAnimationFrame(step);
@@ -5317,6 +5323,7 @@ function rxFinish(){
   cancelAnimationFrame(rx.raf);
   const mv = rx.moves;
   const rec = { id: Date.now(), date: new Date().toISOString(), scramble: rx.scr };
+  if (rxIsSlow()) { rxFinishSlow(rec, mv); return; }
   if (rx.lost || !mv.length) { rec.time = Math.round((rx.lastAt || performance.now()) - rx.t0); rec.lost = true; }
   else {
     const times = fitTimes(mv, rx.t0);
@@ -5334,6 +5341,58 @@ function rxFinish(){
   renderRxStats();
   setTimeout(() => { if (activeTab === 'roux' && rx.phase === 'done') rxNew(); }, 50);
   renderRx();
+}
+// Slow solve: for each step, your moves against the shortest from where that step started
+// (first block, second block with R/U/M/r, LSE with M/U); CMLL against Kian's alg for the case.
+function rxFinishSlow(rec, mv){
+  rec.slow = true;
+  if (rx.lost || !mv.length) { rec.lost = true; rec.time = Math.round((rx.lastAt || performance.now()) - rx.t0); }
+  else {
+    const times = fitTimes(mv, rx.t0);
+    rec.time = Math.round(times[times.length - 1]); rec.start = rx.start; rec.moves = mv.map((x, i) => [x.m, Math.round(times[i])]);
+    rec.stm = ROUX.stm(rec.moves.map(x => x[0]));
+    try { rec.opt = slowOpt(rec); } catch (e) {}
+  }
+  rxSlow.unshift(rec); rxSlowSave();
+  rx.viewSlow = rec.id; rx.phase = 'done'; rx.justDone = true; rx.lost = false;
+  renderRxStats();
+  setTimeout(() => { if (activeTab === 'roux' && rx.phase === 'done') rxNew(); }, 50);
+  renderRx();
+}
+function slowOpt(rec){
+  const sp = ROUX.split(rec.start, rec.moves); if (!sp.steps.length) return null;
+  const at = (i) => { let st = rec.start; for (let j = 0; j < i; j++) st = E.applyMove(st, rec.moves[j][0]); return ROUX.conj(st, sp.r); };
+  const o = { steps: [] };
+  for (const x of sp.steps) {
+    const r = { n: x.name, mv: x.mv, opt: null, ref: null, sols: [] };
+    try {
+      if (x.name === 'FB' && ROUX.fbReady()) { const c = at(x.from); r.opt = ROUX.fbDist(c); r.sols = ROUX.fbSolutions(c, 200, 2).map(y => y.text); }
+      else if (x.name === 'SB') { const v = ROUX.fbView(at(x.from)); if (v) { const y = ROUX.sbSolutions(v, 'full', 60, 2); r.opt = y.opt; r.sols = y.sols.map(z => z.text); } }
+      else if (x.name === 'CMLL') { const c = at(x.from), card = cmFullCardFor(c) || (/swap$/.test(x.case || '') ? LLCARDS.find(y => y.set === 'CMLL' && y.w === 'cp' && y.key.toLowerCase() === x.case) : null); if (card) { r.ref = ROUX.stm(E.parseAlg(card.alg).moves); r.refName = card.name; r.refAlg = card.alg; } else if (x.case === 'skip') r.ref = 0; }
+      else if (x.name === 'LSE' && ROUX.lseReady()) { const y = ROUX.lseSolutions(at(x.from), 'full', 60, 2); r.opt = y.opt; r.sols = y.sols.map(z => z.text); }
+    } catch (e) {}
+    o.steps.push(r);
+  }
+  return o;
+}
+function slowDetailHtml(){
+  const s = rxSlow.find(x => x.id === rx.viewSlow) || rxSlow[0];
+  if (!s) return '<p class="hint">Slow solves: take as long as you like and aim for as few moves as possible. After each one you see, step by step, your moves against the shortest from that point.</p>';
+  let h = '<div class="row" style="justify-content:space-between;margin-top:6px"><p class="phase-title" style="margin:0">Slow solve · ' + (s.stm || '?') + ' moves</p><span class="hint">' + fmtT(s.time) + '</span></div><p class="orig">' + esc(s.scramble || '') + '</p>';
+  if (s.lost) return h + '<p class="hint">Some turns were missed over Bluetooth, so this one cannot be analysed.</p>';
+  if (!s.opt) return h + '<p class="hint">Slotwise could not find the steps in this solve.</p>';
+  const ref = s.opt.steps.reduce((a, x) => a + (x.opt != null ? x.opt : x.ref != null ? x.ref : x.mv), 0);
+  h += '<div class="summary" style="margin-top:8px"><div class="stat big"><div class="v">' + s.stm + '</div><div class="k">your moves</div></div><div class="stat"><div class="v">' + ref + '</div><div class="k">step by step shortest</div></div><div class="stat"><div class="v">+' + Math.max(0, s.stm - ref) + '</div><div class="k">extra moves</div></div></div>';
+  h += '<div class="tablewrap" style="margin-top:8px"><table><thead><tr><th>Step</th><th>You</th><th>Shortest</th><th>Extra</th></tr></thead><tbody>' + s.opt.steps.map(x => {
+    const best = x.opt != null ? x.opt : x.ref;
+    return '<tr><td style="font-family:var(--sans)">' + esc(RX_LONG[x.n] || x.n) + '</td><td>' + x.mv + '</td><td>' + (best != null ? best + (x.opt == null && x.ref != null ? ' <span class="hint">(Kian' + (x.refName ? ': ' + esc(x.refName) : '') + ')</span>' : '') : '—') + '</td><td>' + (best != null ? (x.mv - best > 0 ? '<b style="color:' + (x.mv - best > 3 ? 'var(--bad)' : 'var(--warn)') + '">+' + (x.mv - best) + '</b>' : '<span style="color:var(--good)">0</span>') : '') + '</td></tr>';
+  }).join('') + '</tbody></table></div>';
+  for (const x of s.opt.steps) {
+    if (x.sols && x.sols.length) h += '<p class="hint" style="margin:8px 0 2px">Shortest ' + (RX_LONG[x.n] || x.n).toLowerCase() + ' from where you started it (' + x.opt + ' moves)</p>' + solsHtml(x.sols.map(t => ({ text: t })));
+    else if (x.refAlg) h += '<p class="hint" style="margin:8px 0 2px">Corners: Kian\'s alg for ' + esc(x.refName) + '</p><div class="scr small">' + esc(trigText(x.refAlg)) + '</div>';
+  }
+  h += '<p class="hint">"Shortest" is per step: the fewest moves for that step from the position you left it in (first block with any moves, second block with R, U, M and r, LSE with M and U; M and r count as one). The first block is shown with the cube held as you started; the others with the blocks on the bottom left.</p>';
+  return h;
 }
 function rxAnalyse(s){
   if (rx.cache && rx.cache.id === s.id) return rx.cache.a;
@@ -5398,6 +5457,18 @@ function rxDetailHtml(){
   return h;
 }
 let rxFbSols = null;
+function slowStatsHtml(){
+  const kpi = (v, k) => '<div class="stat"><div class="v">' + v + '</div><div class="k">' + k + '</div></div>';
+  const ok = rxSlow.filter(x => !x.lost && x.stm);
+  const mean = (a) => a.length ? (a.reduce((p, q) => p + q, 0) / a.length).toFixed(1) : '—';
+  let h = '<p class="eyebrow">Your slow solves</p><div class="kpis">' + kpi(ok.length, 'solves') + kpi(ok.length ? Math.min(...ok.map(x => x.stm)) : '—', 'fewest moves') + kpi(mean(ok.slice(0, 5).map(x => x.stm)), 'mean of last 5') + kpi(mean(ok.slice(0, 12).map(x => x.stm)), 'mean of last 12') + '</div>';
+  const per = {}; for (const x of ok.slice(0, 20)) for (const y of ((x.opt || {}).steps || [])) { const b = y.opt != null ? y.opt : y.ref; if (b == null) continue; (per[y.n] = per[y.n] || []).push(y.mv - b); }
+  const rows = ['FB', 'SB', 'CMLL', 'LSE'].filter(k => per[k]);
+  if (rows.length) h += '<p class="eyebrow" style="margin:10px 0 4px">Extra moves per step (last 20)</p><div class="tablewrap"><table><thead><tr><th>Step</th><th>Average extra</th></tr></thead><tbody>' + rows.map(k => '<tr><td style="font-family:var(--sans)">' + RX_LONG[k] + '</td><td>+' + mean(per[k]) + '</td></tr>').join('') + '</tbody></table></div>';
+  if (ok.length) h += '<p class="eyebrow" style="margin:10px 0 4px">Solves</p><div class="tablewrap"><table><thead><tr><th>#</th><th>Moves</th><th>Shortest (per step)</th><th>Time</th></tr></thead><tbody>' + rxSlow.slice(0, 30).map((x, i) => { const ref = x.opt ? x.opt.steps.reduce((a, y) => a + (y.opt != null ? y.opt : y.ref != null ? y.ref : y.mv), 0) : null; return '<tr data-rxslowid="' + x.id + '"' + (x.id === rx.viewSlow ? ' class="sel"' : '') + '><td>' + (rxSlow.length - i) + '</td><td>' + (x.stm || '—') + '</td><td>' + (ref ?? '—') + '</td><td>' + fmtT(x.time) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+  h += '<p class="hint" style="margin-top:10px">Good slow-solve habits: plan the whole first block in inspection, build the second block with R, U, M and r only, and look for the shortest EO before turning. Fewer moves usually means less looking later too.</p>';
+  return h;
+}
 // What the app thinks the cube looks like, with ways out when it is wrong.
 function cubeStatusHtml(){
   if (!conn) return '';
@@ -5427,19 +5498,22 @@ function renderRx(){
   if (rx.phase === 'nocube') h = '<p class="eyebrow">Roux timer</p><p class="phase-title">Connect your cube to time Roux solves</p><p class="hint">The cube times itself and splits the solve into first block, second block, corners and last six edges.</p><p class="orig">Scramble from solved: ' + esc(pathBetween(E.solved(), rx.target).map(rouxTok).join(' ')) + '</p><p class="hint">' + rouxHold() + '</p>';
   else if (rx.phase === 'scrambling') {
     const toks = rx.rem.map((r, i) => '<span class="tok' + (i === 0 ? ' next' : '') + (r.fix ? ' fix' : '') + (r.partial && i === 0 ? ' part' : '') + '">' + rouxTok(r) + '</span>').join('');
-    h = (rx.justDone && rxSolves[0] ? '<p class="eyebrow">Last solve</p><div class="timer">' + fmtT(rxSolves[0].time) + '</div>' : '') +
+    h = (rx.justDone && rxIsSlow() && rxSlow[0] ? '<p class="eyebrow">Last slow solve</p><div class="timer">' + (rxSlow[0].stm || '—') + ' moves</div>' : rx.justDone && rxSolves[0] ? '<p class="eyebrow">Last solve</p><div class="timer">' + fmtT(rxSolves[0].time) + '</div>' : '') +
       '<p class="eyebrow">Scramble · ' + rx.rem.length + ' to go</p><div class="scr">' + toks + '</div>' +
       '<p class="hint">' + rouxHold() + ' After that hold the cube any way you like: the timer starts on your first turn and stops when the cube is solved.</p>';
   } else if (rx.phase === 'inspect') h = '<p class="eyebrow">' + (settings.inspection ? 'Inspection: plan your first block' : 'Ready') + '</p><div class="timer" id="rxTime">' + (settings.inspection ? '15' : '0.00') + '</div><p class="hint">Turn any face to start.</p>';
   else if (rx.phase === 'running') h = '<p class="eyebrow">Solving</p><div class="timer" id="rxTime">0.00</div><div class="row"><button data-rxstop="1">Stop without saving</button></div>';
   else if (rx.phase === 'done') h = '<p class="eyebrow">Solved</p><div class="timer">' + (rxSolves[0] ? fmtT(rxSolves[0].time) : '') + '</div>';
   else h = '<p class="eyebrow">Roux timer</p><p class="phase-title">Loading…</p>';
-  box.innerHTML = h + cubeStatusHtml() + '<div id="rxDetail">' + rxDetailHtml() + '</div>';
+  const seg = '<div class="row" style="margin-bottom:8px"><div class="seg" role="group" aria-label="Solve mode"><button data-rxslow="0" aria-pressed="' + !rxIsSlow() + '">Timed</button><button data-rxslow="1" aria-pressed="' + rxIsSlow() + '">Slow solve (fewest moves)</button></div></div>';
+  if (rxIsSlow() && rx.phase === 'inspect') h = '<p class="eyebrow">Slow solve</p><div class="timer ready" id="rxTime">0.00</div><p class="hint">No clock pressure: plan as long as you like, then solve with as few moves as you can. The time is shown but does not count anywhere.</p>';
+  box.innerHTML = seg + h + cubeStatusHtml() + '<div id="rxDetail">' + (rxIsSlow() ? slowDetailHtml() : rxDetailHtml()) + '</div>';
   renderNet();
   if (rx.phase === 'inspect' || rx.phase === 'running') rxLoop();
 }
 function renderRxStats(){
   const el = $('rxStats'); if (!el) return;
+  if (rxIsSlow()) { el.innerHTML = slowStatsHtml(); return; }
   const kpi = (v, k) => '<div class="stat"><div class="v">' + v + '</div><div class="k">' + k + '</div></div>';
   const fin = rxSolves.map(s => s.time);
   let h = '<p class="eyebrow">Your Roux solves</p><div class="kpis">' + kpi(rxSolves.length, 'solves') + kpi(fmtT(fin.length ? Math.min(...fin) : null), 'best') + kpi(fmtT(aoN(rxSolves, 5)), 'ao5') + kpi(fmtT(aoN(rxSolves, 12)), 'ao12') + kpi(fin.length ? fmtT(fin.reduce((a, b) => a + b, 0) / fin.length) : '—', 'mean') + '</div>';
@@ -5778,6 +5852,8 @@ document.addEventListener('click', (e) => {
   if (e.target.closest('[data-btlog]')) { const txt = JSON.stringify({ app: 'slotwise', tab: activeTab, rx: rx.phase, rd: rd.phase, log: btLog }); (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => toast('Bluetooth log copied. Paste it to me.'), () => { window.prompt('Copy this log:', txt); }); return; }
 });
 $('tabRoux').addEventListener('click', (e) => {
+  const sm = e.target.closest('[data-rxslow]'); if (sm) { settings.rxSlow = sm.dataset.rxslow === '1'; store.set('settings', settings); if (rx.phase === 'running') { cancelAnimationFrame(rx.raf); toast('Solve stopped. It wasn\'t saved.'); rxNew(); } renderRx(); renderRxStats(); if (rxIsSlow()) withLSE(null, () => {}); return; }
+  const sr = e.target.closest('tr[data-rxslowid]'); if (sr) { rx.viewSlow = Number(sr.dataset.rxslowid); renderRx(); renderRxStats(); return; }
   if (e.target.closest('[data-rxstop]')) { cancelAnimationFrame(rx.raf); toast('Solve stopped. It wasn\'t saved.'); rxNew(); return; }
   const db = e.target.closest('[data-rxdel]');
   if (db) {
