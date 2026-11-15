@@ -1630,6 +1630,86 @@ if (typeof module !== 'undefined' && module.exports) module.exports = api; else 
     }
   }
 
+  // ----- last-six-edges solver -----
+  // Seen from the blocks (L and R held still), LSE is just U and M turns: fixed permutations of the
+  // six U/M edges, the U-layer corners (only turned by U) and the M-slice centres (turned by M).
+  // A state is the six edges (where and how flipped), how far U is turned and how far the centres are.
+  // Targets are defined by what is left afterwards, so no edge-orientation convention is needed:
+  //  eo   = the rest needs no edge flipping: U, M2 and M U2 M' / M' U2 M (steps 4b and 4c);
+  //  eolr = only the last four edges are left: M turns and U2 (step 4c);  full = solved.
+  const LSE_SLOTS = [0, 1, 2, 3, 5, 7];
+  const LSE_NAMES = ['U', 'M'];
+  const LSE_MC = []; for (const b of LSE_NAMES) for (const sf of ['', '2', "'"]) LSE_MC.push(fromCube(new CubeLib().move(b + sf)));
+  const LSE_DC = [0, 0, 0, 1, 2, 3]; // centre offset added by U, U2, U', M, M2, M'
+  const FACT = [1, 1, 2, 6, 24, 120, 720];
+  let LSET = null;
+  // piece state (FB frame) + centre offset -> code
+  function lseEnc(s, c) {
+    const pos = LSE_SLOTS.map(p => LSE_SLOTS.indexOf(s.ep.indexOf(p)));
+    if (pos.some(x => x < 0)) return -1;
+    let rank = 0; const used = [false, false, false, false, false, false];
+    for (let i = 0; i < 6; i++) { let k = 0; for (let j = 0; j < pos[i]; j++) if (!used[j]) k++; rank += k * FACT[5 - i]; used[pos[i]] = true; }
+    let eo = 0; for (let i = 0; i < 6; i++) eo = eo * 2 + s.eo[s.ep.indexOf(LSE_SLOTS[i])];
+    const a = s.cp.indexOf(0); if (a > 3) return -1;
+    return ((rank * 64 + eo) * 4 + a) * 4 + (c & 3);
+  }
+  function lseDec(code) {
+    const c = code & 3; code >>= 2; const a = code & 3; code >>= 2; const eo = code & 63; let rank = code >> 6;
+    const s = E.solved(), left = [0, 1, 2, 3, 4, 5], pos = [];
+    for (let i = 0; i < 6; i++) { const k = Math.floor(rank / FACT[5 - i]); rank %= FACT[5 - i]; pos.push(left.splice(k, 1)[0]); }
+    for (let i = 0; i < 6; i++) { s.ep[LSE_SLOTS[pos[i]]] = LSE_SLOTS[i]; s.eo[LSE_SLOTS[pos[i]]] = (eo >> (5 - i)) & 1; }
+    for (let i = 0; i < 4; i++) s.cp[(i + a) % 4] = i;
+    return { s, c };
+  }
+  const LSE_N = 720 * 64 * 16;
+  function lseBuild() {
+    if (LSET) return;
+    // successor table
+    const next = new Int32Array(LSE_N * 6).fill(-1);
+    for (let code = 0; code < LSE_N; code++) {
+      const { s, c } = lseDec(code); if (lseEnc(s, c) !== code) continue; // impossible orientation sums are skipped later
+      for (let m = 0; m < 6; m++) next[code * 6 + m] = lseEnc(E.mult(s, LSE_MC[m]), c + LSE_DC[m]);
+    }
+    // closure of the solved state under move sequences (each a list of moves)
+    const closure = (seqs) => { const g = new Uint8Array(LSE_N), q = [lseEnc(E.solved(), 0)]; g[q[0]] = 1;
+      while (q.length) { const x = q.pop(); for (const sq of seqs) { let y = x; for (const m of sq) { y = next[y * 6 + m]; if (y < 0) break; } if (y >= 0 && !g[y]) { g[y] = 1; q.push(y); } } } return g; };
+    const bfs = (goal) => { const d = new Int8Array(LSE_N).fill(-1), q = new Int32Array(LSE_N); let h = 0, t = 0; for (let x = 0; x < LSE_N; x++) if (goal[x]) { d[x] = 0; q[t++] = x; }
+      while (h < t) { const x = q[h++]; for (let m = 0; m < 6; m++) { const y = next[x * 6 + m]; if (y >= 0 && d[y] < 0) { d[y] = d[x] + 1; q[t++] = y; } } } return d; };
+    const solvedOnly = new Uint8Array(LSE_N); solvedOnly[lseEnc(E.solved(), 0)] = 1;
+    LSET = { next, full: bfs(solvedOnly), eolr: bfs(closure([[3], [4], [5], [1]])), eo: bfs(closure([[0], [1], [2], [4], [3, 1, 5], [5, 1, 3]])) };
+  }
+  // A block-frame state (blocks and corners done, centres maybe off) as seen from the blocks
+  let LSE_SIGN = null;
+  // re-read the cube tilted by x^q: positions move, the pieces keep their names
+  const tiltX = (t) => E.mult(t, RX);
+  function lseView(c) {
+    for (let q = 0; q < 4; q++) {
+      let t = c; for (let i = 0; i < q; i++) t = tiltX(t);
+      if (home(t, FBE, FBC) && home(t, SBE, SBC)) {
+        if (LSE_SIGN == null) { // which way the centres count, from one M turn
+          let t1 = E.applyMoves(E.solved(), [mv(1, 1), mv(4, 3)]), q1 = 0;
+          for (; q1 < 4; q1++) { if (home(t1, FBE, FBC) && home(t1, SBE, SBC)) break; t1 = tiltX(t1); }
+          LSE_SIGN = lseEnc(t1, q1) === lseEnc(LSE_MC[3], 1) ? 1 : -1;
+        }
+        return lseEnc(t, (LSE_SIGN * q) & 3);
+      }
+    }
+    return -1;
+  }
+  function lseDist(c, goal) { lseBuild(); const x = lseView(c); return x < 0 ? null : LSET[goal || 'full'][x]; }
+  function lseDone(c, goal) { return lseDist(c, goal) === 0; }
+  function lseSolutions(c, goal, cap, show) {
+    lseBuild();
+    const T = LSET[goal || 'full'], x0 = lseView(c); if (x0 < 0 || T[x0] < 0) return { opt: null, sols: [] };
+    const raw = [], path = [];
+    const dfs = (x, last) => { if (raw.length >= cap) return; const d = T[x]; if (d === 0) { raw.push(path.slice()); return; }
+      for (let m = 0; m < 6; m++) { if (last >= 0 && ((m / 3) | 0) === ((last / 3) | 0)) continue; const y = LSET.next[x * 6 + m]; if (y < 0 || T[y] !== d - 1) continue; path.push(m); dfs(y, m); path.pop(); } };
+    dfs(x0, -1);
+    const sols = raw.map(ms => ({ moves: ms, text: ms.map(m => LSE_NAMES[(m / 3) | 0] + ['', '2', "'"][m % 3]).join(' '), cost: ms.reduce((a, m) => a + (m === 4 ? 0.15 : 0) + (m === 1 ? 0.1 : 0), 0) }))
+      .sort((a, b) => a.cost - b.cost);
+    return { opt: T[x0], sols: sols.slice(0, show || sols.length) };
+  }
+
   // ----- states for the drills (all in the block frame) -----
   function randomState(fixC, fixE, rng) {
     rng = rng || Math.random;
@@ -1719,7 +1799,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = api; else 
   function cornersOriented(c) { const n = pairN(c); return n >= 0 && coDone(norm(c, n)); }
 
   const api = { ROTS, FMAP, conj, unconj, rotFor, rotFaces, fbN, sbN, pairN, norm, cornersAUF, stageDone, ocName, permName, OC_ALGS, PERM_ALGS, caseState,
-    stm, describe, fmFor, split, fbBuild, fbReady: () => !!FBT, fbDist, fbSolutions, fbdrDone, fbdrDist, fbdrSolutions, lpCase, randomState, lseScramble, lseCase, cmllCase, frameFor, cmllCaseFor, cmllCaseFromAlg, cmllKey, cornersOriented, sbBuild, sbReady: () => !!SBT, sbDist, sbSolutions, sbSquareDone, sbCase };
+    stm, describe, fmFor, split, fbBuild, fbReady: () => !!FBT, fbDist, fbSolutions, fbdrDone, fbdrDist, fbdrSolutions, lpCase, randomState, lseScramble, lseCase, cmllCase, frameFor, cmllCaseFor, cmllCaseFromAlg, cmllKey, cornersOriented, sbBuild, sbReady: () => !!SBT, sbDist, sbSolutions, sbSquareDone, sbCase, lseBuild, lseReady: () => !!LSET, lseDist, lseDone, lseSolutions };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.ROUX = api;
 })(typeof self !== 'undefined' ? self : this);
 </script>
@@ -5187,6 +5267,11 @@ function fitTimes(mv, t0){
 }
 function rotColors(r){ const f = ROUX.rotFaces(r), sc = SCHEME[settings.cross]; return { bottom: sc[FACES[f.bottom]], left: sc[FACES[f.left]], front: sc[FACES[f.front]], top: sc[FACES[f.top]] }; }
 // The first-block table takes a moment to build; do it before a scramble, never during a solve.
+function withLSE(msgEl, then){
+  if (ROUX.lseReady()) { then(); return; }
+  if (msgEl) msgEl.innerHTML = '<p class="eyebrow">Roux</p><p class="phase-title">Building the last-six-edges solver…</p><p class="hint">This takes a few seconds, once per visit.</p>';
+  setTimeout(() => { try { ROUX.lseBuild(); } catch (e) {} then(); }, 40);
+}
 function withFB(msgEl, then){
   if (ROUX.fbReady()) { then(); return; }
   if (msgEl) msgEl.innerHTML = '<p class="eyebrow">Roux</p><p class="phase-title">Building the first-block solver…</p><p class="hint">This takes a few seconds, once per visit.</p>';
@@ -5458,11 +5543,13 @@ function cmCardsHtml(){
 function fbVar(){ return settings.fbVar || 'full'; }
 const FB_VARS = [['full', 'Whole block'], ['lp', 'Last pair'], ['lpdr', 'Last pair + DR']];
 function sbVar(){ return settings.sbVar || 'full'; }
+function lseVar(){ return settings.lseVar || 'full'; }
+const LSE_VARS = [['eo', 'EO'], ['eolr', 'EOLR'], ['full', 'Whole LSE']];
 const SB_VARS = [['full', 'Whole block'], ['fs', 'First square'], ['lp', 'Last pair']];
 // Levels: the length of the shortest solution (M and r count as one move). Pick any of them, or none
 // for the usual mix. The ranges cover nearly every case.
-const LV_RANGE = { 'fb:full': [4, 8], 'fb:lp': [2, 6], 'fb:lpdr': [3, 7], 'sb:full': [6, 12], 'sb:fs': [3, 9], 'sb:lp': [3, 9] };
-function lvKey(){ return rd.kind === 'fb' ? 'fb:' + fbVar() : rd.kind === 'sb' ? 'sb:' + sbVar() : null; }
+const LV_RANGE = { 'fb:full': [4, 8], 'fb:lp': [2, 6], 'fb:lpdr': [3, 7], 'sb:full': [6, 12], 'sb:fs': [3, 9], 'sb:lp': [3, 9], 'lse:eo': [3, 9], 'lse:eolr': [5, 12], 'lse:full': [7, 14] };
+function lvKey(){ return rd.kind === 'fb' ? 'fb:' + fbVar() : rd.kind === 'sb' ? 'sb:' + sbVar() : rd.kind === 'lse' ? 'lse:' + lseVar() : null; }
 function lvSel(key){ settings.rdLv = settings.rdLv || {}; return (settings.rdLv[key || lvKey()] || []).slice(); }
 // a random case whose shortest solution is one of the chosen lengths (or at least minD); gives up
 // after a moment and takes the closest one found
@@ -5504,11 +5591,11 @@ function rdNew(){
       if (cmMode() === 'cards') { const c = want ? cmCard(want) : cmPick(prev); if (c) { G = ROUX.cmllCaseFor(c.w, c.n); if (G) rd.card = c.id; } }
       if (!G) G = ROUX.cmllCase();
     }
-    else G = ROUX.lseCase();
-    rd.target = ROUX.unconj(G, r); rd.attempt = 1; rd.peek = false; if (rd.kind !== 'cmll') rd.card = null; rd.v = rd.kind === 'fb' ? fbVar() : rd.kind === 'sb' ? sbVar() : undefined;
+    else { const v = lseVar(), b = pickByLevel(() => ROUX.lseCase(), (x) => ROUX.lseDist(x, v), v === 'full' ? 6 : 3); G = b.s; rd.lv = b.d; }
+    rd.target = ROUX.unconj(G, r); rd.attempt = 1; rd.peek = false; if (rd.kind !== 'cmll') rd.card = null; rd.v = rd.kind === 'fb' ? fbVar() : rd.kind === 'sb' ? sbVar() : rd.kind === 'lse' ? lseVar() : undefined;
     rdArm();
   };
-  if (rd.kind === 'fb') withFB($('rdBox'), go); else go();
+  if (rd.kind === 'fb') withFB($('rdBox'), go); else if (rd.kind === 'lse') withLSE($('rdBox'), go); else go();
 }
 function rdArm(){
   cancelAnimationFrame(rd.raf);
@@ -5537,7 +5624,7 @@ function rdTurn(m, f, b, raw){
   if (rd.phase !== 'running') return;
   rd.moves.push({ m, raw });
   if (rd.kind === 'cmll' && rd.card) cmTrack(m);
-  const done = rd.kind === 'lse' ? E.equal(cur, E.solved()) : rd.kind === 'fb' && rd.v === 'lpdr' ? ROUX.fbdrDone(ROUX.conj(cur, rdRot())) : rd.kind === 'sb' && rd.v === 'fs' ? ROUX.sbSquareDone(ROUX.conj(cur, rdRot())) : rd.kind === 'cmll' && rd.card && rd.card.startsWith('oc:') ? ROUX.cornersOriented(ROUX.conj(cur, rdRot())) : ROUX.stageDone(rd.kind, ROUX.conj(cur, rdRot()));
+  const done = rd.kind === 'lse' ? (rd.v && rd.v !== 'full' ? ROUX.lseDone(ROUX.conj(cur, rdRot()), rd.v) : E.equal(cur, E.solved())) : rd.kind === 'fb' && rd.v === 'lpdr' ? ROUX.fbdrDone(ROUX.conj(cur, rdRot())) : rd.kind === 'sb' && rd.v === 'fs' ? ROUX.sbSquareDone(ROUX.conj(cur, rdRot())) : rd.kind === 'cmll' && rd.card && rd.card.startsWith('oc:') ? ROUX.cornersOriented(ROUX.conj(cur, rdRot())) : ROUX.stageDone(rd.kind, ROUX.conj(cur, rdRot()));
   if (done) rdFinish();
   else if (rd.kind === 'cmll' && rd.card) renderRd();
 }
@@ -5564,6 +5651,10 @@ function rdFinish(){
       const sp = ROUX.split(rd.start, moves, { rot: r });
       const st = sp.steps.find(x => x.name === (rd.kind === 'cmll' ? 'CMLL' : 'LSE'));
       if (st) { L.steps = st.sub && st.sub.length ? st.sub : [st]; L.text = st.text; L.case = st.case; }
+      if (rd.kind === 'lse') {
+        if (!L.text) L.text = ROUX.describe(moves, r, { anchorFrom: 0, fm0: ROUX.fmFor(Math.max(0, ROUX.pairN(frame))) }).map(t => t.txt).join(' ');
+        const x = ROUX.lseSolutions(frame, rd.v || 'full', 60, 4); if (x.opt != null) { L.opt = x.opt; L.sols = x.sols; }
+      }
     }
   } catch (e) {}
   if (rd.kind === 'cmll' && rd.card) {
@@ -5590,7 +5681,9 @@ function rdResultHtml(){
   if (L.text) h += '<p class="hint" style="margin:8px 0 2px">Your moves</p><div class="scr small">' + L.text.split(' ').map(t => '<span class="tok">' + esc(t) + '</span>').join('') + '</div>';
   if (L.sols && L.sols.length) {
     const c = rotColors(rdRot());
-    if (L.kind === 'sb') h += '<p class="hint" style="margin:8px 0 2px">Shortest ways to ' + (L.v === 'fs' ? 'build the first square (DR and one pair)' : L.v === 'lp' ? 'finish the second block' : 'build the second block') + ' (' + L.opt + ' moves), with ' + c.bottom + ' on the bottom and ' + c.left + ' on the left</p>' +
+    if (L.kind === 'lse') h += '<p class="hint" style="margin:8px 0 2px">Shortest ways to ' + (L.v === 'eo' ? 'orient the edges' : L.v === 'eolr' ? 'do EOLR: orient the edges and put UL and UR in place' : 'finish the last six edges') + ' (' + L.opt + ' moves), holding the blocks on the bottom</p>' +
+      solsHtml(L.sols) + '<p class="hint">' + (L.v === 'eolr' ? 'Done means only M2 and U2 moves are left (the last four edges). Look for how the orienting moves also bring UL and UR together: that is the EOLR idea.' : L.v === 'eo' ? 'Done means the rest can be solved with M2 and U moves only.' : 'M and U turns, M counts as one move.') + '</p>';
+    else if (L.kind === 'sb') h += '<p class="hint" style="margin:8px 0 2px">Shortest ways to ' + (L.v === 'fs' ? 'build the first square (DR and one pair)' : L.v === 'lp' ? 'finish the second block' : 'build the second block') + ' (' + L.opt + ' moves), with ' + c.bottom + ' on the bottom and ' + c.left + ' on the left</p>' +
       solsHtml(L.sols) + '<p class="hint">Only U, R, M and r, so the first block never moves. M and r count as one move each.</p>';
     else h += '<p class="hint" style="margin:8px 0 2px">Shortest ' + (L.v === 'lpdr' ? 'ways to finish the block and the DR edge' : L.v === 'lp' ? 'ways to finish the block' : 'first blocks') + ' (' + L.opt + ' moves), starting with ' + c.bottom + ' on the bottom and ' + c.front + ' in front</p>' +
       solsHtml(L.sols) + '<p class="hint">' + SOLS_NOTE + '</p>';
@@ -5611,13 +5704,16 @@ const RD_HINT = {
   sb: 'The first block is done. Build the second one on the right using only R, r, M and U turns, so the first block never moves.',
   sbfs: 'The first block is done. Build one square of the second block: the DR edge (bottom right) with the front or the back pair. Use R, r, M and U.',
   sblp: 'The first block, the DR edge and one square of the second block are done. Put in the last pair with R, r, M and U.',
+  lseeo: 'Blocks and corners are done. Hold the blocks on the bottom (the centres may be off by an M turn) and orient the six edges. The clock stops when the rest can be done with M2 and U only.',
+  lseeolr: 'Blocks and corners are done. Hold the blocks on the bottom (the centres may be off by an M turn). EOLR: orient the edges and at the same time put UL and UR in place. The clock stops when only M2 and U2 moves are left.',
   cmll: 'Both blocks are done. Solve the four top corners; the edges do not matter yet.',
   lse: 'Blocks and corners are done. Finish with M and U turns only: orient the six edges, place the left and right ones, then the last four.',
 };
 function rdHint(){
   if (rd.kind === 'cmll' && rd.card) return rd.card.startsWith('oc:') ? 'Both blocks are done. Twist the four top corners so the top colour faces up; the clock stops as soon as they all do.' : 'Both blocks are done and the corners already show the top colour. Swap them so each side matches; any U turn at the end is fine.';
-  const lv = rd.lv != null && (rd.kind === 'fb' || rd.kind === 'sb') ? ' Shortest solution: ' + rd.lv + ' moves.' : '';
+  const lv = rd.lv != null && (rd.kind === 'fb' || rd.kind === 'sb' || rd.kind === 'lse') ? ' Shortest solution: ' + rd.lv + ' moves.' : '';
   if (rd.kind === 'sb' && sbVar() !== 'full') return RD_HINT['sb' + sbVar()] + lv;
+  if (rd.kind === 'lse' && lseVar() !== 'full') return RD_HINT['lse' + lseVar()] + (rd.lv != null ? ' Shortest solution: ' + rd.lv + ' moves.' : '');
   return (rd.kind === 'fb' && fbVar() !== 'full' ? RD_HINT[fbVar()] : RD_HINT[rd.kind]) + lv;
 }
 function renderRd(){
@@ -5629,6 +5725,7 @@ function renderRd(){
     h += '<div class="row" style="margin-top:8px"><div class="seg" role="group" aria-label="What to build">' + FB_VARS.map(([k, n]) => '<button data-fbvar="' + k + '" aria-pressed="' + (k === v) + '">' + n + '</button>').join('') + '</div>' +
       (v !== 'full' ? '<label class="hint" for="rdSq">Square built</label><select id="rdSq">' + [['back', 'At the back'], ['front', 'At the front'], ['either', 'Either']].map(([k, n]) => '<option value="' + k + '"' + (k === sq ? ' selected' : '') + '>' + n + '</option>').join('') + '</select>' : '') + '</div>';
   }
+  if (rd.kind === 'lse') h += '<div class="row" style="margin-top:8px"><div class="seg" role="group" aria-label="What to solve">' + LSE_VARS.map(([k, n]) => '<button data-lsevar="' + k + '" aria-pressed="' + (k === lseVar()) + '">' + n + '</button>').join('') + '</div></div>';
   if (rd.kind === 'sb') h += '<div class="row" style="margin-top:8px"><div class="seg" role="group" aria-label="What to build">' + SB_VARS.map(([k, n]) => '<button data-sbvar="' + k + '" aria-pressed="' + (k === sbVar()) + '">' + n + '</button>').join('') + '</div></div>';
   h += lvRowHtml();
   if (rd.kind === 'cmll') h += '<div class="row" style="margin-top:8px"><div class="seg" role="group" aria-label="Corner cases">' + [['cards', 'Cards'], ['mix', 'Random cases']].map(([k, n]) => '<button data-cmmode="' + k + '" aria-pressed="' + (k === cmMode()) + '">' + n + '</button>').join('') + '</div></div>';
@@ -5647,7 +5744,7 @@ function renderRd(){
   } else if (rd.phase === 'ready' || rd.phase === 'running') {
     const c = rotColors(r);
     h += '<p class="eyebrow" style="margin-top:12px">' + (rd.kind === 'fb' ? (rd.phase === 'ready' ? 'Plan it, then turn' : rd.v === 'lpdr' ? 'Finish the block and DR' : rd.v === 'lp' ? 'Finish the block' : 'Build the block') : 'Go') + '</p><div class="timer' + (rd.phase === 'ready' && rd.kind === 'fb' ? ' ready' : '') + '" id="rdTime">0</div>' +
-      '<p class="hint">Hold ' + swc(c.bottom) + c.bottom + ' on the bottom and ' + swc(c.left) + c.left + ' on the left. ' + (rd.kind === 'fb' ? 'The number counts your planning time; the timer starts on your first turn.' : 'The clock is already running, so recognition counts.') + (rd.lv != null && (rd.kind === 'fb' || rd.kind === 'sb') ? ' Shortest solution: <b>' + rd.lv + ' moves</b>.' : '') + '</p>';
+      '<p class="hint">Hold ' + swc(c.bottom) + c.bottom + ' on the bottom and ' + swc(c.left) + c.left + ' on the left. ' + (rd.kind === 'fb' ? 'The number counts your planning time; the timer starts on your first turn.' : 'The clock is already running, so recognition counts.') + (rd.lv != null && (rd.kind === 'fb' || rd.kind === 'sb' || rd.kind === 'lse') ? ' Shortest solution: <b>' + rd.lv + ' moves</b>.' : '') + '</p>';
   }
   h += '<div class="row" style="margin-top:8px"><button class="mini" data-rdnew="1">New scramble</button></div>' + rdResultHtml() + (rd.kind === 'cmll' && cmMode() === 'cards' ? cmCardsHtml() : rdRefHtml());
   box.innerHTML = h + cubeStatusHtml();
@@ -5657,11 +5754,11 @@ function renderRdStats(){
   const el = $('rdStats'); if (!el) return;
   const av = (a) => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
   let h = '<p class="eyebrow">Your drills · first tries, last 30 of each</p><div class="tablewrap"><table><thead><tr><th>Step</th><th>Runs</th><th>Time</th><th>Look</th><th>Moves</th><th>Pauses</th></tr></thead><tbody>';
-  const kinds = [['fb', 'full', 'First block'], ['fb', 'lp', 'FB last pair'], ['fb', 'lpdr', 'FB last pair + DR'], ['sb', 'full', 'Second block'], ['sb', 'fs', 'SB first square'], ['sb', 'lp', 'SB last pair']].concat(RD_KINDS.slice(2).map(([k, n]) => [k, null, n]));
+  const kinds = [['fb', 'full', 'First block'], ['fb', 'lp', 'FB last pair'], ['fb', 'lpdr', 'FB last pair + DR'], ['sb', 'full', 'Second block'], ['sb', 'fs', 'SB first square'], ['sb', 'lp', 'SB last pair'], ['cmll', null, 'Corners (CMLL)'], ['lse', 'eo', 'LSE: EO'], ['lse', 'eolr', 'LSE: EOLR'], ['lse', 'full', 'Last six edges']];
   for (const [k, v, n] of kinds) {
     const xs = rdLog.filter(x => x.k === k && x.first !== false && (!v || (x.v || 'full') === v)).slice(-30);
     if (v && v !== 'full' && !xs.length) continue;
-    h += '<tr><td style="font-family:var(--sans)">' + n + '</td><td>' + xs.length + '</td>' + (xs.length ? '<td>' + fmt(av(xs.map(x => x.t))) + '</td><td>' + fmt(av(xs.map(x => x.look))) + '</td><td>' + av(xs.map(x => x.stm)).toFixed(1) + ((k === 'fb' || k === 'sb') && xs.some(x => x.opt != null) ? ' <span class="hint">(+' + av(xs.filter(x => x.opt != null).map(x => x.stm - x.opt)).toFixed(1) + ' over shortest)</span>' : '') + '</td><td>' + av(xs.map(x => x.pauses)).toFixed(1) + '</td>' : '<td colspan="4"></td>') + '</tr>';
+    h += '<tr><td style="font-family:var(--sans)">' + n + '</td><td>' + xs.length + '</td>' + (xs.length ? '<td>' + fmt(av(xs.map(x => x.t))) + '</td><td>' + fmt(av(xs.map(x => x.look))) + '</td><td>' + av(xs.map(x => x.stm)).toFixed(1) + ((k === 'fb' || k === 'sb' || k === 'lse') && xs.some(x => x.opt != null) ? ' <span class="hint">(+' + av(xs.filter(x => x.opt != null).map(x => x.stm - x.opt)).toFixed(1) + ' over shortest)</span>' : '') + '</td><td>' + av(xs.map(x => x.pauses)).toFixed(1) + '</td>' : '<td colspan="4"></td>') + '</tr>';
   }
   h += '</tbody></table></div>';
   const cm = rdLog.filter(x => x.k === 'cmll' && x.c).slice(-60), by = {};
@@ -5697,6 +5794,7 @@ $('tabRxd').addEventListener('click', (e) => {
   const cmm = e.target.closest('[data-cmmode]'); if (cmm) { settings.cmllMode = cmm.dataset.cmmode; store.set('settings', settings); if (cmm.dataset.cmmode === 'cards') { setTab('cmllc'); return; } rd.last = null; rdNew(); return; }
   if (e.target.closest('[data-cmpeek]')) { rd.peek = true; renderRd(); return; }
   const fv = e.target.closest('[data-fbvar]'); if (fv) { settings.fbVar = fv.dataset.fbvar; store.set('settings', settings); rd.last = null; rdNew(); return; }
+  const lsv = e.target.closest('[data-lsevar]'); if (lsv) { settings.lseVar = lsv.dataset.lsevar; store.set('settings', settings); rd.last = null; rdNew(); return; }
   const sv = e.target.closest('[data-sbvar]'); if (sv) { settings.sbVar = sv.dataset.sbvar; store.set('settings', settings); rd.last = null; rdNew(); return; }
   const lb = e.target.closest('[data-lv]'); if (lb) { const key = lvKey(); if (!key) return; let sel = lvSel(key); if (lb.dataset.lv === 'any') sel = []; else { const n = +lb.dataset.lv; sel = sel.includes(n) ? sel.filter(x => x !== n) : sel.concat(n).sort((a, b) => a - b); } settings.rdLv[key] = sel; store.set('settings', settings); rdNew(); return; }
   const k = e.target.closest('[data-rdkind]'); if (k) { rd.kind = k.dataset.rdkind; settings.rdKind = rd.kind; store.set('settings', settings); rdNew(); return; }
