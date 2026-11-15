@@ -182,6 +182,7 @@ body.has-runbar .toast{bottom:calc(120px + env(safe-area-inset-bottom,0px))}
 .slot.done{border-color:var(--accent);background:var(--accent-soft)}
 .sw{display:inline-flex;border-radius:4px;overflow:hidden;border:1px solid rgba(0,0,0,.25)}
 .sw i{width:9px;height:12px;display:block}
+.trig{display:inline-flex;gap:inherit;padding:1px 3px;margin:0 2px;border:1px solid var(--line);border-radius:7px;background:color-mix(in srgb,var(--line) 25%,transparent)}
 .net{display:grid;grid-template-columns:repeat(12,14px);grid-template-rows:repeat(9,14px);gap:2px;width:max-content}
 .net b{border-radius:2px;display:block;box-shadow:inset 0 0 0 1px rgba(0,0,0,.18)}
 .netbox{display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap}
@@ -1983,15 +1984,59 @@ function rotNote(text){
   p.tokens.forEach((t, i) => { if (/^[xyz]/.test(t)) parts.push('<b>after ' + esc(t) + '</b> ' + hold(p.frames[i])); });
   return '<span class="rotnote">' + parts.join(' · ') + '</span>';
 }
+// ---------- triggers ----------
+// Short sequences that come back in many algs (sexy move, sledgehammer, Sune, inserts...). Algs are
+// shown with them grouped, so you read an alg as a few chunks instead of a string of letters.
+const ALG_TRIGGERS = [
+  ['Sune', "R U R' U R U2 R'"], ['Antisune', "R' U' R U' R' U2 R"], ['Antisune (from the back)', "R U2 R' U' R U' R'"], ['Sune (from the back)', "R' U2 R U R' U R"],
+  ['left Sune', "L' U' L U' L' U2 L"], ['left Antisune', "L U L' U L U2 L'"],
+  ['sexy move', "R U R' U'"], ['reverse sexy', "U R U' R'"], ['inverse sexy', "R' U' R U"], ['sledgehammer', "R' F R F'"], ['hedgeslammer', "F R' F' R"],
+  ['left sexy', "L' U' L U"], ['left sexy', "L U L' U'"], ['left reverse sexy', "U' L' U L"], ['left sledgehammer', "L F' L' F"], ['left hedgeslammer', "F' L F L'"],
+  ['wide sexy', "r U R' U'"], ['wide sledgehammer', "r' F R F'"], ['wide hedgeslammer', "F R' F' r"],
+  ['F sexy F′', "F R U R' U' F'"], ['f sexy f′', "f R U R' U' f'"],
+  ['insert', "R U R'"], ['insert', "R U' R'"], ['insert', "R U2 R'"], ['insert', "R' U R"], ['insert', "R' U' R"], ['insert', "R' U2 R"],
+  ['insert', "L' U L"], ['insert', "L' U' L"], ['insert', "L' U2 L"], ['insert', "L U L'"], ['insert', "L U' L'"], ['insert', "L U2 L'"],
+  ['insert', "r U r'"], ['insert', "r U' r'"], ['insert', "r U2 r'"], ['insert', "r' U r"], ['insert', "r' U' r"], ['insert', "r' U2 r"],
+  ['D trigger', "R' D R"], ['D trigger', "R' D' R"], ['D trigger', "R D R'"], ['D trigger', "R D' R'"], ['D trigger', "r' D r"], ['D trigger', "r' D' r"], ['D trigger', "r D r'"], ['D trigger', "r D' r'"],
+  ['F insert', "F R F'"], ['F insert', "F' R' F"], ['F insert', "F U F'"], ['F insert', "F' U' F"], ['F insert', "F U' F'"], ['F insert', "F' U F"],
+].map(([name, t]) => ({ name, toks: t.split(' ') }));
+const trigNorm = (t) => t.replace(/[’`´]/g, "'").replace(/^([A-Za-z]w?)2'$/, '$12').replace(/^([A-Za-z]w?)'2$/, '$12');
+// best split into triggers: as many moves as possible inside triggers, longer triggers preferred
+function trigGroups(tokens, maxLen){
+  const T = tokens.map(trigNorm), n = T.length, best = new Array(n + 1).fill(0), pick = new Array(n + 1).fill(null);
+  for (let i = n - 1; i >= 0; i--) {
+    best[i] = best[i + 1]; pick[i] = null;
+    for (const tr of ALG_TRIGGERS) {
+      const L = tr.toks.length; if (i + L > n || (maxLen && L > maxLen)) continue;
+      let ok = true; for (let j = 0; j < L; j++) if (T[i + j] !== tr.toks[j]) { ok = false; break; }
+      if (!ok) continue;
+      const v = L * L + best[i + L]; if (v > best[i]) { best[i] = v; pick[i] = tr; }
+    }
+  }
+  const out = []; for (let i = 0; i < n;) { if (pick[i]) { out.push({ from: i, to: i + pick[i].toks.length, name: pick[i].name }); i += pick[i].toks.length; } else i++; }
+  // the whole alg as one trigger tells you nothing: show the triggers inside it instead (F (R U R' U') F')
+  return out.length === 1 && out[0].from === 0 && out[0].to === n ? (n > 1 ? trigGroups(tokens, n - 1) : []) : out;
+}
+// "R U R' U' R' F R F'" -> "(R U R' U') (R' F R F')"
+function trigText(text){
+  if (!text) return text;
+  const toks = String(text).replace(/[()\[\]]/g, ' ').trim().split(/\s+/).filter(Boolean);
+  const gs = trigGroups(toks), out = [];
+  for (let i = 0; i < toks.length; i++) { const g = gs.find(x => x.from === i); if (g) { out.push('(' + toks.slice(g.from, g.to).join(' ') + ')'); i = g.to - 1; } else out.push(toks[i]); }
+  return out.join(' ');
+}
 function algTextHtml(parsed, prog){
   const fp = prog ? firstPendingToken(parsed, prog) : -1;
+  const gs = trigGroups(parsed.tokens);
   return parsed.tokens.map((t, ti) => {
     let cls = 'tok';
     if (prog && ti < fp) cls += ' did';
     else if (prog && ti === fp) cls += ' next' + (prog.acc ? ' part' : '');
     else if (parsed.perToken[ti] === 0) cls += ' rot';
-    if (parsed.perToken[ti] === 0 && parsed.frames) { const c = holdColors(parsed.frames[ti]); return '<span class="' + cls + '" title="After ' + esc(t) + ': ' + c.top + ' on top, ' + c.front + ' in front">' + esc(t) + swc(c.front) + '</span>'; }
-    return '<span class="' + cls + '">' + esc(t) + '</span>';
+    const g0 = gs.find(x => x.from === ti), g1 = gs.find(x => x.to === ti + 1);
+    const open = g0 ? '<span class="trig" title="' + esc(g0.name) + '">' : '', close = g1 ? '</span>' : '';
+    if (parsed.perToken[ti] === 0 && parsed.frames) { const c = holdColors(parsed.frames[ti]); return open + '<span class="' + cls + '" title="After ' + esc(t) + ': ' + c.top + ' on top, ' + c.front + ' in front">' + esc(t) + swc(c.front) + '</span>' + close; }
+    return open + '<span class="' + cls + '">' + esc(t) + '</span>' + close;
   }).join('');
 }
 function firstPendingToken(parsed, prog){
@@ -2360,9 +2405,9 @@ function renderAnalysis(rec, A){
     if (adv) {
       r += '<span class="lbl">Optimal</span><span><code>' + esc(o.alg || '—') + '</code>' + rotNote(o.alg) + '</span><span class="n">' + (o.length ?? '?') + '</span>';
       if (o.alt) r += '<span class="lbl">Nicer</span><code>' + esc(o.alt) + '</code><span class="n">' + (o.length + 1) + '</span>';
-      r += '<span class="lbl">' + algListName() + '</span>' + (o.libAlg ? '<span><code>' + esc(o.libAlg) + '</code>' + rotNote(o.libAlg) + '</span>' : '<span class="hint">' + noAlgText(o) + '</span>') + '<span class="n">' + (o.libTurns ?? '') + '</span>';
+      r += '<span class="lbl">' + algListName() + '</span>' + (o.libAlg ? '<span><code>' + esc(trigText(o.libAlg)) + '</code>' + rotNote(o.libAlg) + '</span>' : '<span class="hint">' + noAlgText(o) + '</span>') + '<span class="n">' + (o.libTurns ?? '') + '</span>';
     } else if (o.libAlg) {
-      r += '<span class="lbl">' + algListName() + (o.libAdvanced ? ' · adv' : '') + '</span><span><code>' + esc(o.libAlg) + '</code>' + rotNote(o.libAlg) + '</span><span class="n">' + o.libTurns + '</span>';
+      r += '<span class="lbl">' + algListName() + (o.libAdvanced ? ' · adv' : '') + '</span><span><code>' + esc(trigText(o.libAlg)) + '</code>' + rotNote(o.libAlg) + '</span><span class="n">' + o.libTurns + '</span>';
     } else {
       r += '<span class="lbl">Optimal</span><span><code>' + esc(o.alg || '—') + '</code>' + rotNote(o.alg) + '</span><span class="n">' + (o.length ?? '?') + '</span>' +
         '<span></span><span class="hint">' + noAlgText(o) + ', so this is the shortest way</span><span></span>';
@@ -2745,51 +2790,54 @@ const CMLL_FREQ = { Sune: 4 / 27, Antisune: 4 / 27, H: 2 / 27, Pi: 4 / 27, 'U (h
 const cmSlug = (n) => n.replace(/\W+/g, '-').replace(/-$/, '');
 for (const [n, a] of ROUX.OC_ALGS) LLCARDS.push({ id: 'cmll-oc-' + cmSlug(n), set: 'CMLL', w: 'oc', key: n, name: n, nick: 'twist the corners', alg: a, group: 'Step 1: orient the corners' });
 for (const [n, a] of ROUX.PERM_ALGS) LLCARDS.push({ id: 'cmll-cp-' + cmSlug(n), set: 'CMLL', w: 'cp', key: n, name: n, nick: 'swap the corners', alg: a, group: 'Step 2: permute the corners' });
-// Full CMLL (one look): Scheopner's list (scheopner.com/cube/cmll.php), checked to keep both blocks and to
-// cover every case. The O cases are the two swap cards above.
+// Full CMLL (one look): Kian Mansour's algs, the bolded (fastest) one for each case in "Kian's CMLLs"
+// (linked from Kian's Roux guide), with the AUF before it left out (any U turn first is accepted).
+// Checked to keep both blocks and to cover every case. The O cases are the two swap cards above.
 const CMLL_FULL = [
-    ["H", "Columns", "R U2 R' U' R U R' U' R U' R'"],
-    ["H", "Single Column", "U F R U' R' U R U2 R' U' R U R' U' F'"],
-    ["H", "Single Row", "r U' r2 D' r U' r' D r2 U r'"],
-    ["H", "Rows", "F R U R' U' R U R' U' R U R' U' F'"],
-    ["Pi", "Back Row", "U F R U R' U' R U R' U' F'"],
-    ["Pi", "Rows", "r U' r2 D' r U r' D r2 U r'"],
-    ["Pi", "Up Slash", "U2 F R' F' R U2 R U' R' U R U2 R'"],
-    ["Pi", "X Checkerboard", "R' F R U F U' R U R' U' F'"],
-    ["Pi", "Down Slash", "U R U2 R' U' R U R' U2 R' F R F'"],
-    ["Pi", "Front Row", "R' U' R' F R F' R U' R' U2 R"],
-    ["U", "Columns", "R2 F U' F U F2 R2 U' R' F R"],
-    ["U", "Front Row", "U2 r U' r' U r' D' r U' r' D r"],
-    ["U", "Right Column", "R2 D' R U2 R' D R U2 R"],
-    ["U", "Back Row", "U' F R2 D R' U R D' R2 U' F'"],
-    ["U", "Left Column", "U2 R2 D R' U2 R D' R' U2 R'"],
-    ["U", "Rows", "U' F R U R' U' F'"],
-    ["T", "Back Row", "F R' F R2 U' R' U' R U R' F2"],
-    ["T", "Rows", "r' D' r U r' D r U' r U r'"],
-    ["T", "Up Slash", "U' R U R' U' R' F R F'"],
-    ["T", "X Checkerboard", "r' U r U2 R2 F R F' R"],
-    ["T", "Down Slash", "U L' U' L U L F' L' F"],
-    ["T", "Front Row", "U2 r2 D' r U r' D r2 U' r' U' r"],
-    ["S", "Left Column", "R U R' U R U2 R'"],
-    ["S", "Down Slash", "R U R' U' R' F R F' R U R' U R U2 R'"],
-    ["S", "X Checkerboard", "R U' L' U R' U' L"],
-    ["S", "Up Slash", "L' U2 L U2 L F' L' F"],
-    ["S", "Columns", "F R' F' R U2 R U2 R'"],
-    ["S", "Right Column", "U2 R U R' U R' F R F' R U2 R'"],
-    ["AS", "Right Column", "U2 R' U' R U' R' U2 R"],
-    ["AS", "Up Slash", "R2 D R' U R D' R' U R' U' R U' R'"],
-    ["AS", "Columns", "F' L F L' U2 L' U2 L"],
-    ["AS", "Down Slash", "R U2 R' U2 R' F R F'"],
-    ["AS", "X Checkerboard", "L' U R U' L U R'"],
-    ["AS", "Left Column", "U R' U' R U' R' U R' F R F' U R"],
-    ["L", "Adj Row", "U2 R U2 R' U' R U R' U' R U R' U' R U' R'"],
-    ["L", "Opp Row", "F R U' R' U' R U R' F'"],
-    ["L", "Opp / Slash", "U' R' U2 R' D' R U2 R' D R2"],
-    ["L", "Adj / Slash", "R U2 R D R' U2 R D' R2"],
-    ["L", "Opp Column", "F R' F' R U R U' R'"],
-    ["L", "Adj Column", "R U2 R2 F R F' R U2 R'"]
+  ["H", "Columns", "R U2 R' U' R U R' U' R U' R'"],
+  ["H", "Rows", "F R U R' U' R U R' U' R U R' U' F'"],
+  ["H", "Column", "R U2 R2 F R F' U2 R' F R F'"],
+  ["H", "Row", "r U' r2 D' r U' r' D r2 U r'"],
+  ["Pi", "Right Bar", "F R U R' U' R U R' U' F'"],
+  ["Pi", "Back Slash", "F R' F' R U2 R U' R' U R U2 R'"],
+  ["Pi", "X Checkerboard", "R' F R U F U' R U R' U' F'"],
+  ["Pi", "Forward Slash", "R U2 R' U' R U R' U2 R' F R F'"],
+  ["Pi", "Columns", "r U' r2 D' r U r' D r2 U r'"],
+  ["Pi", "Left Bar", "R' U' R' F R F' R U' R' U2 R"],
+  ["U", "Forward Slash", "R2 D R' U2 R D' R' U2 R'"],
+  ["U", "Back Slash", "R2 D' R U2 R' D R U2 R"],
+  ["U", "Front Row", "R2 F U' F U F2 R2 U' R' F R"],
+  ["U", "Rows", "F R2 D R' U R D' R2 U' F'"],
+  ["U", "X Checkerboard", "r U' r' U r' D' r U' r' D r"],
+  ["U", "Back Row", "F R U R' U' F'"],
+  ["T", "Left Bar", "R U R' U' R' F R F'"],
+  ["T", "Right Bar", "L' U' L U L F' L' F"],
+  ["T", "Rows", "F R' F R2 U' R' U' R U R' F2"],
+  ["T", "Front Row", "r' U r U2 R2 F R F' R"],
+  ["T", "Back Row", "r' D' r U r' D r U' r U r'"],
+  ["T", "Columns", "r2 D' r U r' D r2 U' r' U' r"],
+  ["S", "Left Bar", "R U R' U R U2 R'"],
+  ["S", "X Checkerboard", "L' U2 L U2 L F' L' F"],
+  ["S", "Forward Slash", "F R' F' R U2 R U2 R'"],
+  ["S", "Columns", "R U R' U' R' F R F' R U R' U R U2 R'"],
+  ["S", "Right Bar", "R U R' U R' F R F' R U2 R'"],
+  ["S", "Back Slash", "R U' L' U R' U' L"],
+  ["AS", "Right Bar", "R' U' R U' R' U2 R"],
+  ["AS", "Columns", "R2 D R' U R D' R' U R' U' R U' R'"],
+  ["AS", "Back Slash", "F' L F L' U2 L' U2 L"],
+  ["AS", "X Checkerboard", "R U2 R' U2 R' F R F'"],
+  ["AS", "Forward Slash", "L' U R U' L U R'"],
+  ["AS", "Left Bar", "R' U' R U' R' U R' F R F' U R"],
+  ["L", "Mirror", "F R U' R' U' R U R' F'"],
+  ["L", "Inverse", "F R' F' R U R U' R'"],
+  ["L", "Pure", "R U2 R' U' R U R' U' R U R' U' R U' R'"],
+  ["L", "Front Commutator", "R U2 R D R' U2 R D' R2"],
+  ["L", "Diag", "R' U' R U R' F' R U R' U' R' F R2"],
+  ["L", "Back Commutator", "R' U2 R' D' R U2 R' D R2"]
 ];
 const CM_SET_NAMES = { S: 'Sune', AS: 'Antisune', H: 'H', Pi: 'Pi', U: 'U', T: 'T', L: 'L' };
+// the first full-CMLL list (Scheopner's) used other case names: move any progress to the same case
+const CM_OLD_IDS = {"cmll-f-H-Columns": "H|Columns", "cmll-f-H-Single-Column": "H|Column", "cmll-f-H-Single-Row": "H|Row", "cmll-f-H-Rows": "H|Rows", "cmll-f-Pi-Back-Row": "Pi|Right Bar", "cmll-f-Pi-Rows": "Pi|Columns", "cmll-f-Pi-Up-Slash": "Pi|Back Slash", "cmll-f-Pi-X-Checkerboard": "Pi|X Checkerboard", "cmll-f-Pi-Down-Slash": "Pi|Forward Slash", "cmll-f-Pi-Front-Row": "Pi|Left Bar", "cmll-f-U-Columns": "U|Front Row", "cmll-f-U-Front-Row": "U|X Checkerboard", "cmll-f-U-Right-Column": "U|Back Slash", "cmll-f-U-Back-Row": "U|Rows", "cmll-f-U-Left-Column": "U|Forward Slash", "cmll-f-U-Rows": "U|Back Row", "cmll-f-T-Back-Row": "T|Rows", "cmll-f-T-Rows": "T|Back Row", "cmll-f-T-Up-Slash": "T|Left Bar", "cmll-f-T-X-Checkerboard": "T|Front Row", "cmll-f-T-Down-Slash": "T|Right Bar", "cmll-f-T-Front-Row": "T|Columns", "cmll-f-S-Left-Column": "S|Left Bar", "cmll-f-S-Down-Slash": "S|Columns", "cmll-f-S-X-Checkerboard": "S|Back Slash", "cmll-f-S-Up-Slash": "S|X Checkerboard", "cmll-f-S-Columns": "S|Forward Slash", "cmll-f-S-Right-Column": "S|Right Bar", "cmll-f-AS-Right-Column": "AS|Right Bar", "cmll-f-AS-Up-Slash": "AS|Columns", "cmll-f-AS-Columns": "AS|Back Slash", "cmll-f-AS-Down-Slash": "AS|X Checkerboard", "cmll-f-AS-X-Checkerboard": "AS|Forward Slash", "cmll-f-AS-Left-Column": "AS|Left Bar", "cmll-f-L-Adj-Row": "L|Pure", "cmll-f-L-Opp-Row": "L|Mirror", "cmll-f-L-Opp-Slash": "L|Back Commutator", "cmll-f-L-Adj-Slash": "L|Front Commutator", "cmll-f-L-Opp-Column": "L|Inverse", "cmll-f-L-Adj-Column": "L|Diag"};
 for (const [set, n, a] of CMLL_FULL) LLCARDS.push({ id: 'cmll-f-' + cmSlug(set + '-' + n), set: 'CMLL', w: 'full', key: set + ' ' + n, name: CM_SET_NAMES[set] + ': ' + n, nick: 'one look', alg: a, group: 'Full CMLL: ' + CM_SET_NAMES[set] + ' cases' });
 function cmCaseBlock(c){ return c.w === 'full' ? ROUX.cmllCaseFromAlg(c.alg) : ROUX.cmllCaseFor(c.w, c.key); }
 let CM_KEYS = null;
@@ -3511,7 +3559,7 @@ function renderLL(){
   const showName = ll.phase === 'done' || ll.revealed || ll.learning || (ll.phase === 'between' && !ll.test);
   html += '<div class="llcard">' + (showName ? caseSVG(cardCase(c), cardSvgSet(c), 112) : hiddenSVG(112)) + '<div class="stage" style="gap:6px;flex:1;min-width:180px">' +
     '<div class="llname">' + (showName ? esc(c.name) + (c.nick ? ' <span class="hint">' + esc(c.nick) + '</span>' : '') : '?') + '</div>' +
-    '<div class="llalg">' + (showName ? esc(algTxt) + rotNote(algTxt) + (c.set === 'F2L' && ll.f2lSlot != null && f2Path ? f2lSlotNote(ll.f2lSlot, f2Path) : '') : '<span class="hidealg">Recognise it ' + (ll.mode === 'virtual' ? 'on the virtual cube below' : 'on your cube') + '</span>') + '</div></div></div>';
+    '<div class="llalg">' + (showName ? esc(trigText(algTxt)) + rotNote(algTxt) + (c.set === 'F2L' && ll.f2lSlot != null && f2Path ? f2lSlotNote(ll.f2lSlot, f2Path) : '') : '<span class="hidealg">Recognise it ' + (ll.mode === 'virtual' ? 'on the virtual cube below' : 'on your cube') + '</span>') + '</div></div></div>';
   if (c.set === 'CMLL' && (ll.phase === 'scrambling' || ll.phase === 'idle')) html += blockSelectHtml('cmBlock');
   if (ll.drill) html += drillBarHtml();
   else if (ll.learnFlow) html += learnBarHtml();
@@ -3613,7 +3661,7 @@ function algEditHtml(c){
   const pickHtml = picks.filter(([a]) => a !== cardAlg(c)).map(([a, lbl]) => '<div class="row" style="margin-top:6px;gap:6px"><span class="hint">' + lbl + ':</span><code>' + esc(a) + '</code><button class="mini" data-usealg="' + esc(a) + '">Use this</button></div>').join('');
   return '<details class="algedit"' + (pickHtml && ll.lastDone && ll.result && ll.result.errs ? ' open' : '') + '><summary>Use a different alg for ' + esc(c.name) + '</summary>' + pickHtml + '<div class="row" style="margin-top:6px">' +
     '<input type="text" id="algEditInput" value="' + esc(cardAlg(c)) + '" spellcheck="false" autocomplete="off"><button class="mini" id="algEditSave">Save</button>' +
-    (st.alg ? '<button class="mini" id="algEditReset">Back to built-in</button>' : '') + '</div><p class="hint" id="algEditMsg" style="margin:4px 0 0">Built-in: <code>' + esc(c.alg) + '</code></p></details>';
+    (st.alg ? '<button class="mini" id="algEditReset">Back to built-in</button>' : '') + '</div><p class="hint" id="algEditMsg" style="margin:4px 0 0">Built-in: <code>' + esc(trigText(c.alg)) + '</code></p></details>';
 }
 function saveCardAlg(c, text){
   const t = String(text || '').trim();
@@ -3692,11 +3740,11 @@ function caseFreq(){
 function tileTip(c){
   if (c.set === 'F2L') {
     const fs = f2lSeenStats(c);
-    return c.name + ' · ' + c.group + ': ' + cardAlg(c) + (fs ? ' · in your solves: ' + fs.n + '×, ' + (fs.extra != null ? (fs.extra > 0 ? '+' : '') + fs.extra.toFixed(1) + ' moves vs the alg, ' + Math.round(fs.clean * 100) + '% as short as the alg' : '') + (fs.t != null ? ', ' + fmt(fs.t) + ' s' : '') : ' · not seen in your solves yet');
+    return c.name + ' · ' + c.group + ': ' + trigText(cardAlg(c)) + (fs ? ' · in your solves: ' + fs.n + '×, ' + (fs.extra != null ? (fs.extra > 0 ? '+' : '') + fs.extra.toFixed(1) + ' moves vs the alg, ' + Math.round(fs.clean * 100) + '% as short as the alg' : '') + (fs.t != null ? ', ' + fmt(fs.t) + ' s' : '') : ' · not seen in your solves yet');
   }
-  if (c.set === 'CMLL') { const ss = solveStats(c); return c.name + ' (' + c.group.toLowerCase() + '): ' + cardAlg(c) + ' · comes up ' + freqText(c) + (ss ? ' · in your Roux solves: ' + ss.n + '×, look ' + fmt(ss.look) + ' s + turn ' + fmt(ss.turn) + ' s' : ''); }
+  if (c.set === 'CMLL') { const ss = solveStats(c); return c.name + ' (' + c.group.toLowerCase() + '): ' + trigText(cardAlg(c)) + ' · comes up ' + freqText(c) + (ss ? ' · in your Roux solves: ' + ss.n + '×, look ' + fmt(ss.look) + ' s + turn ' + fmt(ss.turn) + ' s' : ''); }
   const ss = solveStats(c);
-  return c.name + ': ' + cardAlg(c) + ' · comes up ' + freqText(c) + (ss ? ' · in your timed solves: ' + ss.n + '×, look ' + fmt(ss.look) + ' s + turn ' + fmt(ss.turn) + ' s' : seenInSolves(c) ? ' · seen ' + seenInSolves(c) + '× in your timed solves' : '');
+  return c.name + ': ' + trigText(cardAlg(c)) + ' · comes up ' + freqText(c) + (ss ? ' · in your timed solves: ' + ss.n + '×, look ' + fmt(ss.look) + ' s + turn ' + fmt(ss.turn) + ' s' : seenInSolves(c) ? ' · seen ' + seenInSolves(c) + '× in your timed solves' : '');
 }
 function freqText(c){
   if (c.set === 'F2L') { const tot = F2L_IDX.cases.reduce((a, x) => a + x.size, 0); return '1 in ' + Math.round(tot / c.f2l.size) + ' pairs'; }
@@ -5552,9 +5600,9 @@ function rdResultHtml(){
 function rdRefHtml(){
   if (rd.kind !== 'cmll') return '';
   const pic = (alg) => { try { return caseSVG(ROUX.caseState(alg), 'OLL', 52); } catch (e) { return ''; } };
-  const row = ([n, a]) => '<div class="llcard" style="gap:10px;padding:4px 0">' + pic(a) + '<div><b>' + esc(n) + '</b><br><code>' + esc(a) + '</code></div></div>';
+  const row = ([n, a]) => '<div class="llcard" style="gap:10px;padding:4px 0">' + pic(a) + '<div><b>' + esc(n) + '</b><br><code>' + esc(trigText(a)) + '</code></div></div>';
   return '<details style="margin-top:10px"><summary>2-look corner algs (9 in total)</summary><p class="hint">First twist the corners so the top colour faces up (7 cases). Then swap them if needed (2 cases). These are the Roux versions: the top edges are free to move, so most are shorter than the CFOP OLL algs. The two swaps are the usual J and Y perms.</p>' +
-    '<p class="eyebrow" style="margin:6px 0 2px">1. Orient</p>' + ROUX.OC_ALGS.map(row).join('') + '<p class="eyebrow" style="margin:6px 0 2px">2. Permute</p>' + ROUX.PERM_ALGS.map(([n, a]) => '<div style="padding:4px 0"><b>' + esc(n) + '</b><br><code>' + esc(a) + '</code></div>').join('') + '</details>';
+    '<p class="eyebrow" style="margin:6px 0 2px">1. Orient</p>' + ROUX.OC_ALGS.map(row).join('') + '<p class="eyebrow" style="margin:6px 0 2px">2. Permute</p>' + ROUX.PERM_ALGS.map(([n, a]) => '<div style="padding:4px 0"><b>' + esc(n) + '</b><br><code>' + esc(trigText(a)) + '</code></div>').join('') + '</details>';
 }
 const RD_HINT = {
   fb: 'Plan the whole block before you turn: where its five pieces are and in what order they go in. Then build it on the bottom left without stopping.',
@@ -5774,6 +5822,15 @@ if (!settings.cmllMigrated) {
     if (c && !stat(c.id).known) stat(c.id).known = true;
   }
   settings.cmllMigrated = true; store.set('settings', settings); saveLL();
+}
+// once: progress on the first full-CMLL list moves to the same case in Kian's list (user algs for
+// those cases are dropped, since the old built-in alg is what they replaced)
+if (!settings.cmllKian) {
+  // snapshot first: some names swap between the two lists (their T Rows is Kian's T Back Row and back)
+  const snap = {}; for (const old in CM_OLD_IDS) if (llStats[old]) { snap[old] = llStats[old]; delete llStats[old]; }
+  for (const old in snap) { const st = snap[old], nid = 'cmll-f-' + cmSlug(CM_OLD_IDS[old].replace('|', '-')); delete st.alg; delete st.mine; llStats[nid] = st; }
+  for (const k in (settings.drillSets || {})) settings.drillSets[k] = settings.drillSets[k].map(id => CM_OLD_IDS[id] ? 'cmll-f-' + cmSlug(CM_OLD_IDS[id].replace('|', '-')) : id);
+  settings.cmllKian = true; store.set('settings', settings); saveLL();
 }
 // once: the Roux solves saved before CMLL cases were recorded on the cards
 if (!settings.cmllBackfilled) {
