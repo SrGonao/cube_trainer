@@ -396,7 +396,7 @@ tbody tr:hover,tbody tr.sel{background:var(--accent-soft)}
           <button id="llModeScr" data-llmode="scramble">Scramble my cube</button>
           <button id="llModeVirt" data-llmode="virtual">Virtual cube</button>
         </div>
-        <div class="row"><button class="primary" id="llNext">Next card</button><button id="llNew">New card</button></div>
+        <div class="row"><button class="primary" id="llNext">Next card</button><button id="llNew">New card</button><label class="hint" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="llAuto"> Next card automatically after a clean solve</label></div>
       </div>
       <div class="row" id="f2lSlotRow" hidden><label for="f2lSlotSel">Pair goes in</label><select id="f2lSlotSel"><option value="any">Any slot</option><option value="back">A back slot (no rotation)</option><option value="3">Back right only</option><option value="2">Back left only</option></select></div>
       <div id="llBox"></div>
@@ -3388,7 +3388,7 @@ function setDrillFinish(r){
   D.n++;
   ll.lastRep = r; ll.result = r; ll.phase = 'between';
   renderLL(); renderDeck();
-  setTimeout(() => { if (ll.drill === D && ll.phase === 'between') drillNext(); }, 900);
+  if (autoNextOn() && cleanRep(r)) setTimeout(() => { if (ll.drill === D && ll.phase === 'between' && ll.lastRep === r) drillNext(); }, 900);
 }
 function drillBarHtml(){
   const D = ll.drill;
@@ -3400,12 +3400,28 @@ function drillBarHtml(){
     '<div style="flex-basis:100%;display:flex;gap:4px;flex-wrap:wrap">' + cells + '</div>' +
     '<span class="hint" style="flex-basis:100%">' + (D.show ? 'Alg shown: reps are practice only.' : 'Alg hidden: the case name shows once you have solved it, and these count as reviews (times and slips).') + ' Green: last one clean; orange: a slip, a hint, or alg shown.</span></div>';
 }
+// Clean: solved, no slip off the alg, no hint, alg not revealed, at most 2 extra turns.
+// Half turns as one turn, also when a turn of the opposite face sits in between (an M2 arrives from
+// the cube as R L' R L'), so a slice alg done exactly counts the same as written.
+function cardTurns(ms){
+  const out = [];
+  for (const m of ms) {
+    const f = (m / 3) | 0, q = [1, 2, 3][m % 3], n = out.length;
+    const tryMerge = (j) => { const o = out[j]; if (o.f !== f || o.done || o.q !== q || q === 2) return false; o.q = 2; o.done = true; return true; };
+    if (n && tryMerge(n - 1)) continue;
+    if (n > 1 && out[n - 1].f % 3 === f % 3 && out[n - 1].f !== f && tryMerge(n - 2)) continue;
+    out.push({ f, q, done: q === 2 });
+  }
+  return out.length;
+}
+function autoNextOn(){ return settings.autoNext !== false; }
+function cleanRep(r){ return !!(r && r.ok && (!r.revealed || (ll.drill && ll.drill.show)) && !r.hinted && !r.errs && (r.extraT || 0) <= 2); }
 function llFinish(ok){
   const c = ll.card, st = stat(c.id);
   const t = (ll.moves.length ? ll.moves[ll.moves.length - 1].t : performance.now()) - ll.t0;
   const recog = ll.moves.length ? ll.moves[0].t - ll.t0 : null;
-  const htm = E.mergeQuarterTurns(ll.moves.map(x => x.m)).length;
-  const pathHtm = ll.follow ? E.mergeQuarterTurns(ll.follow.path.parsed.moves).length : null;
+  const htm = cardTurns(ll.moves.map(x => x.m));
+  const pathHtm = ll.follow ? cardTurns(ll.follow.path.parsed.moves) : null;
   learnOwnWay(c, ok, htm);
   ll.lastDone = ok ? lastSolveText() : null;
   const r = { ok, errs: (ll.errs || 0) + (ll.hinted ? 1 : 0), hinted: !!ll.hinted, extraT: pathHtm != null ? htm - pathHtm : 0, t: Math.max(0, t), recog, exec: recog != null ? t - recog : null, htm, revealed: ll.revealed,
@@ -3422,6 +3438,8 @@ function llFinish(ok){
   }
   ll.result = r;
   saveLL(); renderLL(); renderDeck();
+  clearTimeout(ll.autoT);
+  if (autoNextOn() && cleanRep(r)) ll.autoT = setTimeout(() => { if (ll.phase === 'done' && ll.card === c && ll.result === r) nextCard(); }, 1200);
 }
 function learnFinish(r){
   const c = ll.card, st = stat(c.id);
@@ -3662,7 +3680,7 @@ function renderLL(){
   else html += '<div class="learnbar"><span class="hint">Want to drill this one?</span><button class="mini" data-learn="practice">Practise it (alg shown)</button><button class="mini primary" data-learn="test">Test me</button></div>';
   if (ll.phase === 'between') {
     const r = ll.lastRep;
-    html += '<div class="timer ready">' + (r ? fmt(r.t) : '') + '</div><p class="hint">' + (ll.drill ? 'Next one…' : ll.test ? (r && r.ok && !r.revealed ? 'Correct. Next one…' : '') : 'Again…') + '</p>' + cardRotHtml(r);
+    html += '<div class="timer ready">' + (r ? fmt(r.t) : '') + '</div><p class="hint">' + (ll.drill ? (autoNextOn() && cleanRep(r) ? 'Clean. Next one…' : (r && !cleanRep(r) ? 'Not clean' + (r.errs ? ' (' + r.errs + ' slip' + (r.errs > 1 ? 's' : '') + ')' : r.revealed ? ' (alg shown)' : r.hinted ? ' (hint used)' : '') + '. ' : '') + 'Press Next card or the space bar to go on.') : ll.test ? (r && r.ok && !r.revealed ? 'Correct. Next one…' : '') : 'Again…') + '</p>' + cardRotHtml(r);
   } else if (ll.phase === 'scrambling') {
     const cm = c.set === 'CMLL';
     const toks = ll.rem.map((r, i) => '<span class="tok' + (i === 0 ? ' next' : '') + (r.fix ? ' fix' : '') + (r.partial && i === 0 ? ' part' : '') + '">' + (cm ? rouxTok(r) : tokText(r)) + '</span>').join('');
@@ -3679,7 +3697,7 @@ function renderLL(){
     const mr = mistakeRate(c), slow = slowness(c);
     html += '<p class="hint">' + (r.errs ? r.errs + ' slip' + (r.errs > 1 ? 's' : '') + ' off the alg this time. ' : r.extraT > 2 ? r.extraT + ' extra turns this time. ' : r.ok && !r.revealed ? 'Clean. ' : '') +
       'This card: ' + (slow > 1.25 ? 'slower than' : slow < 0.85 ? 'faster than' : 'about as fast as') + ' your other cards' + (mr != null ? ', slips in ' + Math.round(mr * 100) + '% of the last attempts' : '') + '. Weaker cards come up more often; nothing to grade.</p>';
-    html += cardRotHtml(r) + '<p class="hint">Press Next card or the space bar to continue.</p>' + algEditHtml(c);
+    html += cardRotHtml(r) + '<p class="hint">' + (autoNextOn() && cleanRep(r) ? 'Clean: the next card comes up in a moment.' : 'Press Next card or the space bar to continue.') + '</p>' + algEditHtml(c);
   }
   box.innerHTML = html;
   const gu = $('llGiveUp'); if (gu) gu.onclick = llGiveUp;
@@ -5995,6 +6013,8 @@ document.querySelectorAll('[data-llmode]').forEach(b => b.onclick = () => {
   if (ll.card && (ll.phase === 'scrambling' || ll.phase === 'running')) presentCard(ll.card, { learnFlow: ll.learnFlow, test: ll.test, extra: ll.extra }); else renderLL();
 });
 $('llNext').onclick = nextCard;
+$('llAuto').checked = autoNextOn();
+$('llAuto').onchange = () => { settings.autoNext = $('llAuto').checked; store.set('settings', settings); clearTimeout(ll.autoT); renderLL(); };
 $('llNew').onclick = () => { ll.drill = null; newCard(); };
 $('drillBox').addEventListener('toggle', () => renderDeck());
 document.addEventListener('change', (e) => {
