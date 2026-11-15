@@ -2222,12 +2222,26 @@ function stepRem(list, f, b){
   let pending = 0; while (pending < list.length && list[pending].fix) pending++;
   return pending > 6;
 }
+// Follow the scramble, and when the undos pile up offer a fresh path, but keep following the undo
+// list too: if you go back, that list shrinks and is shown again, so the scramble does not keep
+// changing under you. Whichever of the two is shorter is shown.
+function pendingUndos(l){ let p = 0; while (p < l.length && l[p].fix) p++; return p; }
+function scrStep(list, f, b, target){
+  // U: the original scramble with your undos in front. It is always followed and comes back as
+  // soon as few undos are left, so going back to where you went wrong restores it.
+  const U = list.undo || list, showingU = U === list;
+  stepRem(U, f, b);
+  if (!showingU) stepRem(list, f, b);
+  if (pendingUndos(U) > 25) { const F = pathBetween(cur, target); F.undo = null; return F; } // gave up on it
+  if (pendingUndos(U) <= 6) { U.undo = null; return U; }
+  // many undos: offer a fresh path, worked out once and then followed (never re-made)
+  const D = showingU ? pathBetween(cur, target) : list;
+  if (D.length >= U.length) { U.undo = null; return U; }
+  D.undo = U; return D;
+}
 function stepScramble(f, b){
   if (!rem.length) return;
-  if (stepRem(rem, f, b)) {
-    rem = pathBetween(cur, target).map(r => Object.assign(r, { fix: true }));
-    toast('Lots of turns to undo, so here is a shorter way back to the scramble.');
-  }
+  rem = scrStep(rem, f, b, target);
   if (!rem.length) {
     if (E.equal(cur, target)) {
       if (retryOf != null) enterPractice();
@@ -3280,7 +3294,7 @@ function llDone(s){
 function llTurn(m, f, b, raw){
   if (ll.mode === 'virtual' && ll.vstate) { ll.vstate = E.applyMove(ll.vstate, m); render3D(); }
   if (ll.phase === 'scrambling' && ll.mode === 'scramble') {
-    if (stepRem(ll.rem, f, b)) ll.rem = pathBetween(cur, ll.target).map(r => Object.assign(r, { fix: true }));
+    ll.rem = scrStep(ll.rem, f, b, ll.target);
     if (!ll.rem.length) { if (E.equal(cur, ll.target)) llStart(); else ll.rem = pathBetween(cur, ll.target); }
     renderLL(); return;
   }
@@ -4204,7 +4218,7 @@ function tLoop(){
 }
 function timerTurn(m, f, b, raw){
   if (tm.phase === 'scrambling') {
-    if (stepRem(tm.rem, f, b)) tm.rem = pathBetween(cur, tm.target).map(r => Object.assign(r, { fix: true }));
+    tm.rem = scrStep(tm.rem, f, b, tm.target);
     if (!tm.rem.length) { if (E.equal(cur, tm.target)) { tInspect(); return; } tm.rem = pathBetween(cur, tm.target); }
     renderTimer(); return;
   }
@@ -5127,7 +5141,7 @@ function cxLoop(){
 function crossTurn(m, f, b, raw){
   const now = raw && raw.localTimestamp != null ? raw.localTimestamp : performance.now();
   if (cx.phase === 'scrambling') {
-    if (stepRem(cx.rem, f, b)) cx.rem = pathBetween(cur, cx.target).map(r => Object.assign(r, { fix: true }));
+    cx.rem = scrStep(cx.rem, f, b, cx.target);
     if (!cx.rem.length) { if (E.equal(cur, cx.target)) { cxInspect(); return; } cx.rem = pathBetween(cur, cx.target); }
     renderCross(); return;
   }
@@ -5309,7 +5323,7 @@ function rxLoop(){
 }
 function rouxTurn(m, f, b, raw){
   if (rx.phase === 'scrambling') {
-    if (stepRem(rx.rem, f, b)) rx.rem = pathBetween(cur, rx.target).map(r => Object.assign(r, { fix: true }));
+    rx.rem = scrStep(rx.rem, f, b, rx.target);
     if (!rx.rem.length) { if (E.equal(cur, rx.target)) { rxInspect(); return; } rx.rem = pathBetween(cur, rx.target); }
     renderRx(); return;
   }
@@ -5690,7 +5704,7 @@ function rdLoop(){
 }
 function rdTurn(m, f, b, raw){
   if (rd.phase === 'scrambling') {
-    if (stepRem(rd.rem, f, b)) rd.rem = pathBetween(cur, rd.target).map(r => Object.assign(r, { fix: true }));
+    rd.rem = scrStep(rd.rem, f, b, rd.target);
     if (!rd.rem.length) { if (E.equal(cur, rd.target)) { rdReady(); return; } rd.rem = pathBetween(cur, rd.target); }
     renderRd(); return;
   }
