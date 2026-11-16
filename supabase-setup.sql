@@ -17,7 +17,7 @@ create table if not exists public.slotwise_kv (
 );
 create index if not exists slotwise_items_changed on public.slotwise_items (user_id, updated_at);
 
-create or replace function public.slotwise_touch() returns trigger language plpgsql as $$
+create or replace function public.slotwise_touch() returns trigger language plpgsql set search_path = '' as $$
 begin new.updated_at = clock_timestamp(); return new; end $$;
 drop trigger if exists slotwise_items_touch on public.slotwise_items;
 create trigger slotwise_items_touch before insert or update on public.slotwise_items for each row execute function public.slotwise_touch();

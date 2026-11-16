@@ -6,6 +6,7 @@
 <title>Slotwise</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0E7C66">
+<script>try { var th = localStorage.getItem('slotwise-theme'); if (th === 'light' || th === 'dark') document.documentElement.setAttribute('data-theme', th); } catch (e) {}</script>
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <script src="config.js"></script>
@@ -93,7 +94,8 @@ button:disabled{opacity:.5;cursor:default}
 .tile.insel::after{content:'✓';position:absolute;top:4px;right:7px;font:700 12px var(--sans);color:var(--accent)}
 .tile .tname{font:600 12px var(--mono)}
 .tile .tmeta{font:11px var(--mono);color:var(--muted);font-variant-numeric:tabular-nums}
-.tile.unknown{opacity:.55}
+.tile.unknown{background:var(--ground)}
+.tile.unknown svg{opacity:.6}
 .tile label{position:absolute;top:4px;left:6px;display:flex}
 .tile .spd{height:3px;width:100%;border-radius:2px;background:var(--line)}
 .tile .spd i{display:block;height:100%;border-radius:2px}
@@ -117,6 +119,7 @@ button:disabled{opacity:.5;cursor:default}
 .timer{font:700 clamp(48px,11vw,84px)/1 var(--mono);letter-spacing:-.03em;font-variant-numeric:tabular-nums}
 .timer.ready{color:var(--accent)}
 .timer.warn{color:var(--warn)}
+#tBox #tTime{touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;cursor:pointer}
 .poolgroups{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:4px 14px}
 .poolg{display:grid;grid-template-columns:auto 1fr;gap:0 6px;align-items:baseline;font-size:14px}
 .poolg .hint{grid-column:2;font-size:12px}
@@ -232,8 +235,8 @@ button.opt.open{outline:2px solid var(--accent);outline-offset:1px}
 table{border-collapse:collapse;width:100%;font-size:14px}
 th{font:600 11px var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);text-align:left;padding:6px 10px;border-bottom:1px solid var(--line)}
 td{padding:7px 10px;border-bottom:1px solid var(--line);font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
-tbody tr{cursor:pointer}
-tbody tr:hover,tbody tr.sel{background:var(--accent-soft)}
+tbody tr[tabindex]{cursor:pointer}
+tbody tr[tabindex]:hover,tbody tr.sel{background:var(--accent-soft)}
 .kpis{display:flex;flex-wrap:wrap;gap:8px 24px;margin-bottom:10px}
 .progress{height:4px;background:var(--line);border-radius:2px;overflow:hidden;width:120px}
 .progress i{display:block;height:100%;background:var(--accent);width:0}
@@ -241,6 +244,30 @@ tbody tr:hover,tbody tr.sel{background:var(--accent-soft)}
 .modal .panel{max-width:440px;width:100%;display:flex;flex-direction:column;gap:12px}
 .modal input[type=text]{flex:none}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--ground);padding:9px 14px;border-radius:8px;font-size:14px;z-index:11;max-width:calc(100% - 32px)}
+/* the method switch is a setting, the tab bar is navigation: keep them visibly different */
+header .seg button[aria-pressed="true"]{background:var(--ink);color:var(--panel)}
+.themebtn{padding:7px 10px;line-height:1;font-size:15px}
+tbody tr[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+#dataPanel > summary{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:baseline;list-style:none;margin:0}
+#dataPanel > summary::-webkit-details-marker{display:none}
+#dataPanel > summary .eyebrow{margin:0}
+#dataPanel > summary .eyebrow::before{content:'▸ '}
+#dataPanel[open] > summary .eyebrow::before{content:'▾ '}
+#dataPanel[open] > summary{margin-bottom:10px}
+.deckhead{grid-column:1/-1;font:600 11px var(--sans);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:8px 0 0;display:flex;gap:8px;align-items:baseline}
+.deckhead:first-child{margin-top:0}
+.deckhead span{font-weight:400;letter-spacing:0;text-transform:none}
+/* fingers need bigger targets than a mouse pointer */
+@media (pointer:coarse){
+  button{min-height:42px}
+  button.mini{min-height:38px;padding:6px 12px;font-size:13px}
+  .tabs button,.seg button{min-height:40px}
+  button.opt{min-height:34px}
+  input[type=text],input[type=email],input[type=password],select{min-height:42px}
+  input[type=checkbox]{width:20px;height:20px}
+  details summary{padding:8px 0}
+  .sb-row{height:18px}
+}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
@@ -254,13 +281,14 @@ tbody tr:hover,tbody tr.sel{background:var(--accent-soft)}
       <span class="status"><span class="dot" id="dot"></span><span id="connText">No cube connected</span></span>
       <span class="status" id="bootStatus"><span id="bootText">Starting…</span><span class="progress"><i id="bootBar"></i></span></span>
       <button class="primary" id="btnConnect">Connect cube</button>
+      <button id="btnTheme" class="themebtn" aria-label="Colour theme: follows your device" title="Colour theme: follows your device">◐</button>
     </div>
   </header>
   <nav class="subnav" id="drillNav" aria-label="Drill" hidden></nav>
 
   <div id="tabF2L" class="stage" style="gap:16px" hidden>
   <div class="grid">
-    <section class="panel stage" aria-live="polite">
+    <section class="panel stage">
       <div id="phaseBox"></div>
       <div class="netbox">
         <div>
@@ -337,11 +365,11 @@ tbody tr:hover,tbody tr.sel{background:var(--accent-soft)}
   </section>
   </div>
   <div class="grid" id="tabCross" hidden>
-    <section class="panel stage" id="cxBox" aria-live="polite"></section>
+    <section class="panel stage" id="cxBox"></section>
     <section class="panel" id="cxStats"></section>
   </div>
   <div class="grid" id="tabTricks" hidden>
-    <section class="panel stage" id="trBox" aria-live="polite"></section>
+    <section class="panel stage" id="trBox"></section>
     <section class="panel">
       <p class="eyebrow">Your drills</p>
       <div class="tablewrap" id="trLog"></div>
@@ -350,11 +378,11 @@ tbody tr:hover,tbody tr.sel{background:var(--accent-soft)}
     </section>
   </div>
   <div class="grid" id="tabRoux" hidden>
-    <section class="panel stage" id="rxBox" aria-live="polite"></section>
+    <section class="panel stage" id="rxBox"></section>
     <section class="panel" id="rxStats"></section>
   </div>
   <div class="grid" id="tabRxd" hidden>
-    <section class="panel stage" id="rdBox" aria-live="polite"></section>
+    <section class="panel stage" id="rdBox"></section>
     <section class="panel" id="rdStats"></section>
   </div>
   <div id="tabPlan" class="stage" style="gap:16px" hidden>
@@ -365,7 +393,7 @@ tbody tr:hover,tbody tr.sel{background:var(--accent-soft)}
     </div>
   </div>
   <div class="grid" id="tabTimer">
-    <section class="panel stage" aria-live="polite">
+    <section class="panel stage">
       <div id="tBox"></div>
       <details>
         <summary>Timer settings</summary>
@@ -390,7 +418,7 @@ tbody tr:hover,tbody tr.sel{background:var(--accent-soft)}
     </section>
   </div>
   <div class="grid" id="tabLL" hidden>
-    <section class="panel stage" aria-live="polite">
+    <section class="panel stage">
       <div class="row" style="justify-content:space-between">
         <div class="seg" role="group" aria-label="How cases are set up">
           <button id="llModeScr" data-llmode="scramble">Scramble my cube</button>
@@ -443,25 +471,27 @@ tbody tr:hover,tbody tr.sel{background:var(--accent-soft)}
       <div class="deck" id="deck"></div>
     </section>
   </div>
-  <section class="panel" id="dataPanel">
-    <p class="eyebrow">Your data</p>
+  <details class="panel" id="dataPanel">
+    <summary><span class="eyebrow">Your data and sync</span><span class="hint" id="dataSum"></span></summary>
     <p class="hint" style="margin:0 0 10px">Your solves, cards and settings are saved on this device, in this browser. Sign in below to keep your phone and laptop in step. Export a backup now and then; Import brings it back.</p>
     <div class="row"><button id="btnExport">Export backup</button><button id="btnImport">Import backup</button><input type="file" id="importFile" accept=".json,application/json" hidden><span class="hint" id="dataStatus"></span></div>
     <div id="syncBox"></div>
-  </section>
+  </details>
 </div>
 
-<div class="modal" id="macModal" hidden>
+<div class="modal" id="macModal" role="dialog" aria-modal="true" aria-labelledby="macTitle" hidden>
   <div class="panel">
-    <p class="phase-title">Cube MAC address needed</p>
+    <p class="phase-title" id="macTitle">Cube MAC address needed</p>
     <p class="hint">GAN cubes encrypt their data with a key based on the MAC address. You can find it in csTimer's Bluetooth dialog or in the GAN app. It looks like <code>AB:12:CD:34:EF:56</code>.</p>
     <p class="flag" id="macWhy" hidden></p>
-    <input type="text" id="macInput" placeholder="AB:12:CD:34:EF:56">
+    <label for="macInput" class="hint" style="margin-bottom:-6px">MAC address</label>
+    <input type="text" id="macInput" placeholder="AB:12:CD:34:EF:56" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-describedby="macErr">
+    <p class="hint" id="macErr" role="alert" style="color:var(--bad)" hidden>That is not a MAC address. It has 12 characters, digits 0–9 and letters A–F, like AB:12:CD:34:EF:56.</p>
     <div class="row"><button class="primary" id="macOk">Connect</button><button id="macCancel">Cancel</button></div>
-    <p class="hint">To run from localhost: open a terminal in the folder with slotwise.html, run <code>python3 -m http.server 8000</code> (on Windows: <code>py -m http.server 8000</code>), and open <code>http://localhost:8000/slotwise.html</code> in Chrome.</p>
+    <p class="hint">The address is saved on this device (and synced if you are signed in), so you only type it once per cube.</p>
   </div>
 </div>
-<div class="toast" id="toast" hidden></div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 <div class="runbar" id="runBar" hidden></div>
 
 <script>(function(){var H,g,F,Z,$,R,D,L,U,B,S,b,E,K,y,C,P,_,q,N,O,M,x,J,z,I,V,ee,ne,X,Q,A,G;[q,_,K,$,P,H]=[0,1,2,3,4,5],[V,x,z,O,U,S,D,E]=[0,1,2,3,4,5,6,7],[I,M,J,N,b,L,B,R,C,y,g,F]=[0,1,2,3,4,5,6,7,8,9,10,11],[ne,Q,G]=(function(){var d,m,v,c,a,r;return r=function(n){return n-1},a=function(n){return r(9)+n},v=function(n){return a(9)+n},m=function(n){return v(9)+n},c=function(n){return m(9)+n},d=function(n){return c(9)+n},[[4,13,22,31,40,49],[[r(9),a(1),v(3)],[r(7),v(1),c(3)],[r(1),c(1),d(3)],[r(3),d(1),a(3)],[m(3),v(9),a(7)],[m(1),c(9),v(7)],[m(7),d(9),c(7)],[m(9),a(9),d(7)]],[[r(6),a(2)],[r(8),v(2)],[r(4),c(2)],[r(2),d(2)],[m(6),a(8)],[m(2),v(8)],[m(4),c(8)],[m(8),d(8)],[v(6),a(4)],[v(4),c(6)],[d(6),c(4)],[d(4),a(6)]]]})(),ee=["U","R","F","D","L","B"],X=[["U","R","F"],["U","F","L"],["U","L","B"],["U","B","R"],["D","F","R"],["D","L","F"],["D","B","L"],["D","R","B"]],A=[["U","R"],["U","F"],["U","L"],["U","B"],["D","R"],["D","F"],["D","L"],["D","B"],["F","R"],["F","L"],["B","L"],["B","R"]],Z=(function(){var d,m,v;class c{constructor(r){var n;r!=null?this.init(r):this.identity(),this.newCenter=(function(){var e,t;for(t=[],n=e=0;e<=5;n=++e)t.push(0);return t})(),this.newCp=(function(){var e,t;for(t=[],n=e=0;e<=7;n=++e)t.push(0);return t})(),this.newEp=(function(){var e,t;for(t=[],n=e=0;e<=11;n=++e)t.push(0);return t})(),this.newCo=(function(){var e,t;for(t=[],n=e=0;e<=7;n=++e)t.push(0);return t})(),this.newEo=(function(){var e,t;for(t=[],n=e=0;e<=11;n=++e)t.push(0);return t})()}init(r){return this.center=r.center.slice(0),this.co=r.co.slice(0),this.ep=r.ep.slice(0),this.cp=r.cp.slice(0),this.eo=r.eo.slice(0)}identity(){var r;return this.center=[0,1,2,3,4,5],this.cp=[0,1,2,3,4,5,6,7],this.co=(function(){var n,e;for(e=[],r=n=0;n<=7;r=++n)e.push(0);return e})(),this.ep=[0,1,2,3,4,5,6,7,8,9,10,11],this.eo=(function(){var n,e;for(e=[],r=n=0;n<=11;r=++n)e.push(0);return e})()}toJSON(){return{center:this.center,cp:this.cp,co:this.co,ep:this.ep,eo:this.eo}}asString(){var r,n,e,t,i,o,h,f,s,u,l;for(l=[],e=t=0;t<=5;e=++t)l[9*e+4]=ee[this.center[e]];for(e=i=0;i<=7;e=++i)for(r=this.cp[e],s=this.co[e],h=o=0;o<=2;h=++o)l[Q[e][(h+s)%3]]=X[r][h];for(e=f=0;f<=11;e=++f)for(n=this.ep[e],s=this.eo[e],h=u=0;u<=1;h=++u)l[G[e][(h+s)%2]]=A[n][h];return l.join("")}static fromString(r){var n,e,t,i,o,h,f,s,u,l,p,k,w,j;for(t=new c,i=h=0;h<=5;i=++h)for(o=f=0;f<=5;o=++f)r[9*i+4]===ee[o]&&(t.center[i]=o);for(i=s=0;s<=7;i=++s){for(l=u=0;u<=2&&!((j=r[Q[i][l]])==="U"||j==="D");l=++u);for(n=r[Q[i][(l+1)%3]],e=r[Q[i][(l+2)%3]],o=p=0;p<=7;o=++p)n===X[o][1]&&e===X[o][2]&&(t.cp[i]=o,t.co[i]=l%3)}for(i=k=0;k<=11;i=++k)for(o=w=0;w<=11;o=++w){if(r[G[i][0]]===A[o][0]&&r[G[i][1]]===A[o][1]){t.ep[i]=o,t.eo[i]=0;break}if(r[G[i][0]]===A[o][1]&&r[G[i][1]]===A[o][0]){t.ep[i]=o,t.eo[i]=1;break}}return t}clone(){return new c(this.toJSON())}static random(){return new c().randomize()}isSolved(){var r,n,e,t,i,o,h;for(e=this.clone(),e.move(e.upright()),n=i=0;i<=5;n=++i)if(e.center[n]!==n)return!1;for(r=o=0;o<=7;r=++o)if(e.cp[r]!==r||e.co[r]!==0)return!1;for(t=h=0;h<=11;t=++h)if(e.ep[t]!==t||e.eo[t]!==0)return!1;return!0}centerMultiply(r){var n,e,t;for(t=e=0;e<=5;t=++e)n=r.center[t],this.newCenter[t]=this.center[n];return[this.center,this.newCenter]=[this.newCenter,this.center],this}cornerMultiply(r){var n,e,t;for(t=e=0;e<=7;t=++e)n=r.cp[t],this.newCp[t]=this.cp[n],this.newCo[t]=(this.co[n]+r.co[t])%3;return[this.cp,this.newCp]=[this.newCp,this.cp],[this.co,this.newCo]=[this.newCo,this.co],this}edgeMultiply(r){var n,e,t;for(t=e=0;e<=11;t=++e)n=r.ep[t],this.newEp[t]=this.ep[n],this.newEo[t]=(this.eo[n]+r.eo[t])%2;return[this.ep,this.newEp]=[this.newEp,this.ep],[this.eo,this.newEo]=[this.newEo,this.eo],this}multiply(r){return this.centerMultiply(r),this.cornerMultiply(r),this.edgeMultiply(r),this}move(r){var n,e,t,i,o,h,f,s,u;for(f=v(r),e=0,i=f.length;e<i;e++)for(o=f[e],n=o/3|0,h=o%3,u=t=0,s=h;0<=s?t<=s:t>=s;u=0<=s?++t:--t)this.multiply(c.moves[n]);return this}upright(){var r,n,e,t,i,o;for(r=this.clone(),o=[],n=t=0;t<=5&&r.center[n]!==K;n=++t);switch(n){case $:o.push("x");break;case q:o.push("x'");break;case H:o.push("x2");break;case _:o.push("y");break;case P:o.push("y'")}for(o.length&&r.move(o[0]),e=i=0;i<=5&&r.center[e]!==q;e=++i);switch(e){case P:o.push("z");break;case _:o.push("z'");break;case $:o.push("z2")}return o.join(" ")}static inverse(r){var n,e,t,i,o,h,f;if(h=(function(){var s,u,l,p;for(l=v(r),p=[],s=0,u=l.length;s<u;s++)i=l[s],n=i/3|0,o=i%3,p.push(n*3+-(o-1)+1);return p})(),h.reverse(),typeof r=="string"){for(f="",e=0,t=h.length;e<t;e++)i=h[e],n=i/3|0,o=i%3,f+=d[n],o===1?f+="2":o===2&&(f+="'"),f+=" ";return f.substring(0,f.length-1)}else return r.length!=null?h:h[0]}}return c.prototype.randomize=(function(){var a,r,n,e,t,i,o,h,f;return i=function(s,u){return s+Math.floor(Math.random()*(u-s+1))},f=function(s){var u,l,p;for(u=s.length;u!==0;)l=i(0,u-1),u-=1,p=s[u],[s[u],s[l]]=[s[l],s[u]]},e=function(s){var u,l,p,k,w,j,Y,re;for(w=0,Y=(function(){var T,W,te;for(te=[],re=T=0,W=s.length-1;0<=W?T<=W:T>=W;re=0<=W?++T:--T)te.push(!1);return te})();;){for(u=-1,p=k=0,j=s.length-1;0<=j?k<=j:k>=j;p=0<=j?++k:--k)if(!Y[p]){u=p;break}if(u===-1)break;for(l=0;!Y[u];)Y[u]=!0,l++,u=s[u];w+=l+1}return w},a=function(s,u){var l;return l=e(u)+e(s),l%2===0},n=function(s,u){for(f(u),f(s);!a(s,u);)f(u),f(s)},o=function(s,u){var l,p,k,w;for(k=0,l=p=0,w=s.length-1;0<=w?p<=w:p>=w;l=0<=w?++p:--p)k+=s[l]=i(0,u-1)},t=function(s,u){return s.reduce(function(l,p){return l+p})%u===0},r=function(s,u){for(o(s,3);!t(s,3);)o(s,3);for(o(u,2);!t(u,2);)o(u,2)},h=function(){return n(this.cp,this.ep),r(this.co,this.eo),this},h})(),c.moves=[{center:[0,1,2,3,4,5],cp:[O,V,x,z,U,S,D,E],co:[0,0,0,0,0,0,0,0],ep:[N,I,M,J,b,L,B,R,C,y,g,F],eo:[0,0,0,0,0,0,0,0,0,0,0,0]},{center:[0,1,2,3,4,5],cp:[U,x,z,V,E,S,D,O],co:[2,0,0,1,1,0,0,2],ep:[C,M,J,N,F,L,B,R,b,y,g,I],eo:[0,0,0,0,0,0,0,0,0,0,0,0]},{center:[0,1,2,3,4,5],cp:[x,S,z,O,V,U,D,E],co:[1,2,0,0,2,1,0,0],ep:[I,y,J,N,b,C,B,R,M,L,g,F],eo:[0,1,0,0,0,1,0,0,1,1,0,0]},{center:[0,1,2,3,4,5],cp:[V,x,z,O,S,D,E,U],co:[0,0,0,0,0,0,0,0],ep:[I,M,J,N,L,B,R,b,C,y,g,F],eo:[0,0,0,0,0,0,0,0,0,0,0,0]},{center:[0,1,2,3,4,5],cp:[V,z,D,O,U,x,S,E],co:[0,1,2,0,0,2,1,0],ep:[I,M,g,N,b,L,y,R,C,J,B,F],eo:[0,0,0,0,0,0,0,0,0,0,0,0]},{center:[0,1,2,3,4,5],cp:[V,x,O,E,U,S,z,D],co:[0,0,1,2,0,0,2,1],ep:[I,M,J,F,b,L,B,g,C,y,N,R],eo:[0,0,0,1,0,0,0,1,0,0,1,1]},{center:[q,K,P,$,H,_],cp:[V,x,z,O,U,S,D,E],co:[0,0,0,0,0,0,0,0],ep:[I,M,J,N,b,L,B,R,y,g,F,C],eo:[0,0,0,0,0,0,0,0,1,1,1,1]},{center:[H,_,q,K,P,$],cp:[V,x,z,O,U,S,D,E],co:[0,0,0,0,0,0,0,0],ep:[I,N,J,R,b,M,B,L,C,y,g,F],eo:[0,1,0,1,0,1,0,1,0,0,0,0]},{center:[P,q,K,_,$,H],cp:[V,x,z,O,U,S,D,E],co:[0,0,0,0,0,0,0,0],ep:[J,M,B,N,I,L,b,R,C,y,g,F],eo:[1,0,1,0,1,0,1,0,0,0,0,0]}],m={U:0,R:1,F:2,D:3,L:4,B:5,E:6,M:7,S:8,x:9,y:10,z:11,u:12,r:13,f:14,d:15,l:16,b:17},d={0:"U",1:"R",2:"F",3:"D",4:"L",5:"B",6:"E",7:"M",8:"S",9:"x",10:"y",11:"z",12:"u",13:"r",14:"f",15:"d",16:"l",17:"b"},v=function(a){var r,n,e,t,i,o,h;if(typeof a=="string"){for(o=a.split(/\s+/),h=[],r=0,n=o.length;r<n;r++)if(t=o[r],t.length!==0){if(t.length>2)throw new Error(`Invalid move: ${t}`);if(e=m[t[0]],e===void 0)throw new Error(`Invalid move: ${t}`);if(t.length===1)i=0;else if(t[1]==="2")i=1;else if(t[1]==="'")i=2;else throw new Error(`Invalid move: ${t}`);h.push(e*3+i)}return h}else return a.length!=null?a:[a]},c.moves.push(new c().move("R M' L'").toJSON()),c.moves.push(new c().move("U E' D'").toJSON()),c.moves.push(new c().move("F S B'").toJSON()),c.moves.push(new c().move("U E'").toJSON()),c.moves.push(new c().move("R M'").toJSON()),c.moves.push(new c().move("F S").toJSON()),c.moves.push(new c().move("D E").toJSON()),c.moves.push(new c().move("L M").toJSON()),c.moves.push(new c().move("B S'").toJSON()),c}).call(this),typeof module<"u"&&module!==null?module.exports=Z:this.Cube=Z}).call(this);
@@ -706,12 +736,13 @@ aes-js/index.js:
       if (solutions.length || capped) {
         const opt = solutions.slice();
         let near = [];
+        const optCapped = capped; // whether the optimal search itself ran out of budget
         if (solutions.length && opts.extraDepth && !capped) {
           solutions.length = 0; nodes = 0;
-          dfs(0, depth + 1, -1);
+          dfs(0, depth + 1, -1); // if this pass runs out, only the one-move-longer list is incomplete
           near = solutions.slice();
         }
-        return { length: opt.length ? depth : null, solutions: opt, nearSolutions: near, nodes, capped };
+        return { length: opt.length ? depth : null, solutions: opt, nearSolutions: near, nodes, capped: optCapped };
       }
     }
     return { length: null, solutions: [], nearSolutions: [], nodes, capped: true };
@@ -863,7 +894,7 @@ aes-js/index.js:
     const cleaned = expandRepeats(str).replace(/[()\[\]{}]/g, ' ').replace(/[’`´]/g, "'").trim();
     if (!cleaned) return null;
     const toks = cleaned.split(/\s+/);
-    for (const t of toks) if (!TOKEN_RE.test(t)) return null;
+    for (const t of toks) if (!TOKEN_RE.test(t) || /^[^RLUDFB]w/.test(t)) return null; // only face letters take a "w" (Mw, xw mean nothing)
     return toks;
   }
   // Returns { moves: fixed-frame move indices, perToken: fixed moves produced per token, turns } or null
@@ -1391,6 +1422,9 @@ if (typeof module !== 'undefined' && module.exports) module.exports = api; else 
         if (iEO >= 0 && iLR >= 0) { sub2.push(part('Orient edges (EO)', iCM, iEO)); sub2.push(part('UL and UR edges', iEO, iLR)); sub2.push(part('Last 4 edges', iLR, end)); }
         steps.push(part('LSE', iCM, end, { sub: sub2 }));
       }
+    } else if (opts.partialCO && iCO > iB) {
+      // a drill that stops once the corners are twisted right (they are never permuted)
+      steps.push(part('CMLL', iB, iCO, { case: ocName(info(iB).N), sub: [] }));
     }
     return { steps, r, iFB, iB, iCO, iCM, iEO, iLR, solved: solvedEnd };
   }
@@ -1810,9 +1844,26 @@ if (typeof module !== 'undefined' && module.exports) module.exports = api; else 
 'use strict';
 const E = F2L;
 const $ = (s) => document.getElementById(s);
+// Solve records come back from backups and from sync, and many of their fields are shown as they
+// are. None of them needs < > or ", so drop those on the way in: a crafted record can't inject markup.
+const SCRUB = { solves: 1, history: 1, rouxSolves: 1, rouxSlow: 1, cross: 1, practice: 1, rouxDrills: 1 };
+function scrub(v){
+  if (typeof v === 'string') return /[<>"]/.test(v) ? v.replace(/[<>"]/g, '') : v;
+  if (Array.isArray(v)) { for (let i = 0; i < v.length; i++) { const x = v[i]; if (typeof x === 'string' || (x && typeof x === 'object')) v[i] = scrub(x); } return v; }
+  if (v && typeof v === 'object') { for (const k in v) { const x = v[k]; if (typeof x === 'string' || (x && typeof x === 'object')) v[k] = scrub(x); } }
+  return v;
+}
 const store = {
-  get(k, d){ try { const v = localStorage.getItem('slotwise.' + k); return v == null ? d : JSON.parse(v); } catch(e){ return d; } },
-  set(k, v){ if (window.__swFrozen) return; /* new data was just loaded from another device; the page is restarting */ try { localStorage.setItem('slotwise.' + k, JSON.stringify(v)); } catch(e){} try { if (window.__swTouch) window.__swTouch(k); } catch(e){} }
+  // A stored value of the wrong shape (a damaged backup, a bad sync row) falls back to the default
+  // instead of breaking the app at start.
+  get(k, d){ try { const v = localStorage.getItem('slotwise.' + k); if (v == null) return d; const o = SCRUB[k] ? scrub(JSON.parse(v)) : JSON.parse(v); if (Array.isArray(d)) return Array.isArray(o) ? o : d; if (d && typeof d === 'object') return (o && typeof o === 'object' && !Array.isArray(o)) ? o : d; return o; } catch(e){ return d; } },
+  set(k, v){
+    if (window.__swFrozen) return; /* new data was just loaded from another device; the page is restarting */
+    try { localStorage.setItem('slotwise.' + k, JSON.stringify(v)); store.failed = false; }
+    catch(e){ if (!store.failed) { store.failed = true; try { toast('Could not save: this browser\'s storage for Slotwise is full. Export a backup now, then clear old sessions.', 12000); } catch(e2){} try { updateDataStatus(); } catch(e2){} } return; }
+    try { if (window.__swTouch) window.__swTouch(k); } catch(e){}
+  },
+  failed: false
 };
 const settings = Object.assign({ cross: 'white', threshold: 2, allowD: false, timerStart: 'scramble', algText: null, alwaysAdv: false, alwaysAdvAlgs: false }, store.get('settings', {}));
 const BUILTIN_ALGS = "# Section 1: Basic F2L\nU2 (R U R') U (R U' R')\ny U2 (L' U' L) U' (L' U L)\ny F R U2 R' F'\nF' L' U2 L F\nU (R U2 R') U (R U' R')\ny U' (L' U2 L) U' (L' U L)\nU (R U' R') U' (R U' R' U R U' R')\ny U' (L' U L) U (L' U L U' L' U L)\nU (F R' F' R) U (R U R')\ny U' (F' L F L') U' (L' U' L)\nU2 (L F' L' F) (R U R')\ny U2 (R F' R' F) (L' U' L)\ny U L' U' (L2 F' L' F) (L' U L)\nU' R U (R2' F R F') (R U' R')\ny F' (U' L' U L) F (L' U L)\nF (U R U' R') F' (R U' R')\ny' U2 R U' R' U' S R' S'\ny2 U2 L' U L U S' L S\n(R U2 R') U' (R U R')\ny (L' U2 L) U (L' U' L)\n(R U R')\ny (L' U' L)\nU' (R U R') U (R U R')\ny U (L' U' L) U' (L' U' L)\nU2 (R U' R') U' (R U R')\ny U2 (L' U L) U (L' U' L)\nR' U R2 U R'\ny L U' L2' U' L\nR' U2 R2 U R2' U R\ny L U2 L2' U' L2 U' L'\n(R U' R') U (R U' R') U2 (R U' R')\ny (L' U L) U' (L' U L) U2 (L' U L)\nR' U2 R2 U R'\ny L U2 L2' U' L\ny U L' U2 L U' y' R U R'\nU' (R U2 R') U y (L' U' L)\nU' (R U' R') U (R U R')\ny U (L' U L) U' (L' U' L)\ny U' (L' U L)\nU (R U' R')\ny U (L' U2 L) U2 (L' U L)\nU' (R U2 R') U2 (R U' R')\nr' U2 R2 U R2' U r\ny l U2 L2' U' L2 U' l'\nU' (R U R') U2 (R U' R')\ny U (L' U' L) U2 (L' U L)\ny U l' U L U' L' U' l\nU' r U' R' U R U r'\nM U (L F' L') U' M'\ny M U' (R' F R) U M'\nU' (R' U R) U' (R U R')\ny U (L U' L') U (L' U' L)\ny (L' U L) y' U2 (R U R')\n(R U' R') y U2 (L' U' L)\ny' (R2' F R F' R) U2 (R' U R)\ny2 (L2 F' L' F L') U2 (L U' L')\ny2 (f' L f) U2 (L U L')\ny' (f R' f') U2 R' U' R\nU (R U R') U2 (R U R')\ny U' (L' U' L) U2 (L' U' L)\nU' (R U2 R') U (R U R')\ny U (L' U2 L) U' (L' U' L)\ny U (L' U L) U2 (L' U L)\nU' R U' R' U2 R U' R'\nU (F' U' F) U' (R U R')\ny U' (F U F') U (L' U' L)\ny U2 (L' U' L) (F' L F L')\nU2 (R U R') (F R' F' R)\ny U' M' (U' L' U l) (L' U L)\nU M' (U R U' r') (R U' R')\ny U' (L U F' L' F) (L' U L)\nU (R' U' F R F') (R U' R')\ny' U2 (R' U' R) y U (R U' R')\ny2 U2 (L U L') y' U' (L' U L)\ny' U2 R' U' M U' R U M'\ny2 U2 L U M U L' U' M'\ny2 U (f' L' f) U' (L U L')\ny' U' (f R f') U (R' U' R)\n(U R U' R')3\nU' (R' F R F') (R U' R')\n(R U' R') (F' U2 F)\ny' R' U R' F R F' R\ny' U' (R' U2 R) (f R f')\n(R U R') U' (R U R')\ny (L' U' L) U (L' U' L)\ny M' (U' L' U L) (U' L' U l)\nM' (U R U' R') (U R U' r')\ny (L F' L' F)2\n(R' F R F')2\n(R U' R') U (R U' R')\ny (L' U L) U' (L' U L)\nU' (R' F R F') (R U R')\ny U (L F' L' F) (L' U' L)\n(R' F' R) (U R U' R') F\ny (L F L') (U' L' U L) F'\nU' F' (R U R' U') (R' F R)\ny U F (L' U' L U) (L F' L')\ny U' (L' U L) (F' L F L')\nU (R U' R') (F R' F' R)\ny2 U' M U L U' M' U L'\ny' U M U' R' U M' U' R\ny' U' R' U M U' R U M'\ny2 U L U' M U L' U' M'\n(R U' R') U (R U2 R' U R U' R')\ny' (L' U L) U' (L' U2' L U' L' U L)\ny' (L' U L) U (L' U' L U2' L' U L)\n(R U' R') U' (R U R' U2 R U' R')\n(R U' R') (F' L' U2 L F)\ny (L' U L) (F R U2' R' F')\ny (F R U2' R' F') (L' U' L)\n(F' L' U2 L F) (R U R')\ny2 L2 F U F' U' L' U L'\ny' R2' F' U' F U R U' R\ny' R' U R' U' F' U F R2\ny2 L U' L U F U' F' L2'\nR2' U2' F R2 F' U2' R' U R'\ny L2 U2 F' L2' F U2 L U' L\ny' (f R' f') U (R' U2' R) U (R' U2' R)\ny2 (f' L f) U' (L U2 L') U' (L U2 L')\n# Section 2: Advanced F2L\nU' R' U R2 U' R'\ny U L U' L2' U L\nU2 (R' U R) U' (S R S')\ny U2 (L U' L') U (S' L' S)\ny R' F R2 U' R' U2 F'\nL F' L2' U L U2' F\ny2 U2 (L F' L' F) (L U L')\ny' U2 (R' F R F') (R' U' R)\nU2 L2' u L2 u' L2'\nL F' U F L'\ny U2 R2 u' R2' u R2\ny R' F U' F' R\ny' U2 L2' u' L2 u L2'\ny' (L' u' L) U' (L' u L)\ny2 U2 R2 u R2' u' R2\ny2 (R u R') U (R u' R')\nR' U' R2 U R'\ny L U L2' U' L\nF D R D' F'\ny F' D' L' D F\ny R (F U F') R'\nL' (F' U' F) L\ny2 F (L U L') F'\ny' F' (R' U' R) F\ny' R u R u' R'\ny2 L' u' L' u L\nU' (L' U' L) (R U' R')\nU (R U R') (L' U L)\ny U2 L' U' L2 U L2' U' L\ny' U2' R U R2' U' R2 U R'\n(F U2 F') (R U R')\ny (F' U2 F) (L' U' L)\ny L U2 L' F U F'\nR' U2 R F' U' F\ny' R U2 R' f R f'\ny2 L' U2 L f' L' f\nU (R U R') (L U L')\ny U' (L' U' L) (R' U' R)\nU' (R U2 R') U' (L U L')\ny U (L' U2 L) U (R' U' R)\ny U (L' U L) (R' U R)\nU' (R U' R') (L U' L')\nU2 F' (L U L') F\ny U2' F (R' U' R) F'\ny U2 L' (B U B') L\nU2' R (B' U' B) R'\ny' U2 R' (F U F') R\ny2 U2' L (F' U' F) L'\ny2 f' U L U' f\ny' f U' R' U f'\nU (R U' R') (L' U L)\ny (L' U2 L) U' (L U L')\ny U2 (L' U L) U' (L U2 L')\nU2 (R U' R') U (L' U' L)\ny U' L' U' L2 U2 L'\ny (F' L F L') U' (L U2 L')\n(R U R') U' (L' U L)\nU' (R U R') (F U F')\ny (S' L S)\ny U (L' U L) U (L U L')\ny U' (F U F') (L U L')\ny U' (L' U L) (R U' R')\n(R U2 R') U (R' U' R)\nU2 (R U' R') U (R' U2 R)\n(F R' F' R) U (R' U2 R)\nU R U R2' U2 R\ny U2 (L' U L) U' (R U R')\n(S R' S')\nU (F U' F') (R' U' R)\ny (L' U' L) U (R U' R')\nU' (R U' R') U' (R' U R)\ny U (L' U' L) (F' U' F)\nU' (F' U F) (L U2 L')\nU (R U' R') U (f' L f)\ny U' (L' U L) U' (f R' f')\ny U (F U' F') (R' U2 R)\n(R U' R') (L U2 L')\n(R U R') (f' L f)\ny (L' U' L) (f R' f')\ny (L' U L) (R' U2 R)\n(R U' R') U (L U L')\n(R' F R F') (L U2 L')\ny (L F' L' F) (R' U2 R)\ny (L' U' L) U' (R' U' R)\n# Section 3: Expert F2L\nR2 U' R2' U R2\nf' R' U R f\ny2 L2' U' L2 U L2'\ny R' u' R u R\ny F' R' F2 R F\ny' L' u' L u L\ny2 f' D' L D f\ny L2' U L2 U' L2'\ny f L U' L' f'\ny' R2 U R2' U' R2\nL u L' u' L'\nF L F2' L' F'\ny2 R u R' u' R'\ny' f D R' D' f'\nL2' u' L2 u L2'\n(L' u' L) U (L' u L)\ny' R2 u R2' u' R2\ny' (R u R') U' (R u' R')\ny L2' u L2 u' L2'\ny (L u L') U' (L u' L')\ny2 R2 u' R2' u R2\ny2 (R' u' R) U (R' u R)\nR' F R2 U' R2' F' R\ny L F' L2' U L2 F L'\nL F' L2' U' L2 F L'\ny R' F R2 U R2' F' R\ny (f' L' f) U' (L' U L)\n(f R f') U (R U' R')\ny' (R U R') U' (f R' f')\ny2 (L' U' L) U (f' L f)\ny2 (f R f') (L U2 L')\ny' (f' L' f) (R' U2' R)\nR (L U2 L') R'\ny L' (R' U2 R) L\nL F2' L' F U' F\ny R' F2 R F' U F'\n(L F' L' U' F) U' (R U R')\ny (R' F R U F') U (L' U' L)\ny (L U' F' L' F) (L' U L)\n(R' U F R F') (R U' R')\n(R' F R U' F') (R U' R')\ny (L F' L' U F) (L' U L)\ny (L' U' L) U (S' L' S)\n(R U R') U' (S R S')\n(L' U L) (M' U R U' r') (R U' R')\ny (R U' R') (M' U' L' U l) (L' U L)\ny (L U F' L' F) U2 (L' U' L)\n(R' U' F R F') U2 (R U R')\ny (L U L') (F U F') U' (L' U L)\n(R' U' R) (F' U' F) U (R U' R')\n(R' F R U' F') U (R U' R')\ny (L F' L' U F) U' (L' U L)\nR U' R2' u' R' u R\ny L' U L2 u L u' L'\ny2 L U' L2' u' L' u L\ny' R' U R2 u R u' R'";
@@ -1859,7 +1910,8 @@ const pendingAnalysis = [];
 const fmt = (ms) => ms == null ? '—' : (ms / 1000).toFixed(2);
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const tick = () => new Promise(r => setTimeout(r, 0));
-function toast(msg){ const t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => t.hidden = true, 4200); }
+// Longer messages stay up longer; pass ms to force a duration.
+function toast(msg, ms){ const t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => t.hidden = true, ms || Math.min(12000, Math.max(4200, 1800 + String(msg).length * 55))); }
 function slotSwatch(j){ const s = SCHEME[settings.cross]; return '<span class="sw"><i style="background:' + COLORS[s[SLOT_FACES[j][0]]] + '"></i><i style="background:' + COLORS[s[SLOT_FACES[j][1]]] + '"></i></span>'; }
 function slotName(j){ const s = SCHEME[settings.cross]; return s[SLOT_FACES[j][0]] + '–' + s[SLOT_FACES[j][1]]; }
 function slotLabel(j){ return slotSwatch(j) + E.SLOT_NAMES[j]; }
@@ -1904,7 +1956,7 @@ function newScramble(){
   rem = pathBetween(cur, target);
   origScramble = rem.map(tokText).join(' ');
   rem.forEach(r => r.fix = false);
-  fixes = 0; retryOf = null; practice = null;
+  fixes = 0; retryOf = null; practice = null; if (!vTimer) demoRun = false;
   setPhase(rem.length ? 'scrambling' : 'ready');
 }
 // Scramble to the exact starting position of an earlier solve, keeping its analysis on screen.
@@ -2308,10 +2360,17 @@ function finishSolve(){
   if (solveFromScramble) rec.fromScramble = true;
   if (retryOf != null) rec.retryOf = retryOf;
   lastTime = rec.time;
+  const isDemo = demoRun; demoRun = false;
   setPhase('analyzing');
   const run = () => {
-    const A = analyze(rec);
-    rec.sum = summarize(A);
+    let A;
+    try { A = analyze(rec); rec.sum = summarize(A); }
+    catch (e) { toast('This solve could not be analysed, so it was not saved.'); newScramble(); return; }
+    if (isDemo) { // shown, never saved: a demo must not count in your averages or case stats
+      rec.label = 'demo solve'; extRecs.set(rec.id, rec); viewingId = rec.id;
+      renderAnalysis(rec, A); renderHistory(); newScramble(); toast('Demo solve: shown here, not saved.');
+      return;
+    }
     if (sessObj('f2l').caseStats !== false) try { recordF2LSegments(rec.start, rec.moves.map(x => x[0]), A, 'f2l'); } catch (e) {}
     rec.session = curSess('f2l');
     try { const rr = runState(); if (rr) rec.planStep = curStep(rr).name; } catch (e) {}
@@ -2559,7 +2618,7 @@ function renderHistory(){
   tb.innerHTML = history.map((h, i) => {
     const s = h.sum || {};
     const over = s.opt != null ? s.htm - s.opt : null;
-    return '<tr data-id="' + h.id + '"' + (h.id === viewingId ? ' class="sel"' : '') + '><td>' + (history.length - i) + (h.retryOf != null ? ' ↻' : '') + '</td><td>' + fmt(h.time) + '</td><td>' + (s.htm ?? '') + '</td><td>' + (over == null ? '' : '+' + over) + '</td><td>' + (s.missed ?? '') + '</td><td>' + esc(s.order || '') + '</td><td style="font-family:var(--sans)">' + new Date(h.date).toLocaleString([], { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }) + '</td></tr>';
+    return '<tr data-id="' + h.id + '" tabindex="0"' + (h.id === viewingId ? ' class="sel"' : '') + '><td>' + (history.length - i) + (h.retryOf != null ? ' ↻' : '') + '</td><td>' + fmt(h.time) + '</td><td>' + (s.htm ?? '') + '</td><td>' + (over == null ? '' : (over < 0 ? '' : '+') + over) + '</td><td>' + (s.missed ?? '') + '</td><td>' + esc(s.order || '') + '</td><td style="font-family:var(--sans)">' + new Date(h.date).toLocaleString([], { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }) + '</td></tr>';
   }).join('');
   const mean = (arr) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
   const last = (n) => history.slice(0, n);
@@ -2602,10 +2661,24 @@ function readMacFromAdvert(device){
 async function askMac(name, saved, why){
   $('macWhy').hidden = !why; $('macWhy').textContent = why ? 'Why it couldn\'t be found automatically: ' + why : '';
   return new Promise((resolve) => {
-    $('macModal').hidden = false; $('macInput').value = saved || ''; $('macInput').focus();
-    const done = (v) => { $('macModal').hidden = true; $('macOk').onclick = $('macCancel').onclick = null; resolve(v); };
-    $('macOk').onclick = () => { const v = $('macInput').value.trim().toUpperCase(); done(/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(v) ? v : null); };
+    const back = document.activeElement;
+    $('macModal').hidden = false; $('macInput').value = saved || ''; $('macErr').hidden = true; $('macInput').focus();
+    const done = (v) => { $('macModal').hidden = true; $('macOk').onclick = $('macCancel').onclick = $('macModal').onkeydown = null; try { if (back && back.focus) back.focus(); } catch (e) {} resolve(v); };
+    // accept any separators (AB:12…, AB-12…, AB12…); a wrong address keeps the dialog open and says why
+    $('macOk').onclick = () => {
+      const hex = $('macInput').value.toUpperCase().replace(/[^0-9A-F]/g, '');
+      if (hex.length !== 12 || /[^0-9A-F:\-\s.]/i.test($('macInput').value)) { $('macErr').hidden = false; $('macInput').focus(); return; }
+      done(hex.match(/../g).join(':'));
+    };
     $('macCancel').onclick = () => done(null);
+    $('macModal').onkeydown = (e) => {
+      if (e.key === 'Enter' && e.target === $('macInput')) { e.preventDefault(); $('macOk').click(); }
+      else if (e.key === 'Escape') { e.preventDefault(); done(null); }
+      else if (e.key === 'Tab') { // keep the focus inside the dialog
+        const f = [$('macInput'), $('macOk'), $('macCancel')], i = f.indexOf(document.activeElement);
+        e.preventDefault(); f[(i + (e.shiftKey ? -1 : 1) + f.length) % f.length].focus();
+      }
+    };
   });
 }
 let lastDevice = null, wantConn = false, reconn = null, macConfirmed = false, macTimer = 0, idleSyncT = 0;
@@ -2616,8 +2689,9 @@ async function connect(){
     toast('This browser has no Web Bluetooth. Use Chrome or Edge on a laptop or Android. If you opened the file directly and it still fails, serve it from localhost.');
     return;
   }
-  wantConn = true;
-  await openConn(null);
+  if (connect.busy) return; // a second click while the chooser or the MAC dialog is open would start a second connection
+  wantConn = true; connect.busy = true; $('btnConnect').disabled = true;
+  try { await openConn(null); } finally { connect.busy = false; $('btnConnect').disabled = false; }
 }
 // device: a cube we were connected to before (reconnect without the chooser), or null to ask.
 async function openConn(device){
@@ -2680,7 +2754,7 @@ function startReconnect(){
       const ok = await openConn(dev);
       clearTimeout(timer);
       if (R.stop) { if (ok && conn) { try { conn.disconnect(); } catch (e) {} } return; }
-      if (ok) { reconn = null; setConn(true); toast('Cube reconnected.'); return; }
+      if (ok && conn) { reconn = null; setConn(true); toast('Cube reconnected.'); return; } // it can drop again while the first commands are sent
       await new Promise(r => setTimeout(r, 2000));
     }
     if (reconn === R) { reconn = null; wantConn = false; setConn(false); toast('Could not reconnect to the cube. Press Connect cube.'); }
@@ -2705,8 +2779,11 @@ function validFacelets(ev){
 // The tracked state was replaced by what the cube reports: put whatever is in progress right.
 function onResync(){
   if (phase === 'solving' && activeTab === 'f2l') { cancelAnimationFrame(rafId); toast('Turns were missed over Bluetooth, so this solve was not saved.'); newScramble(); }
+  else if (phase === 'scrambling' && retryOf != null) { rem = pathBetween(cur, target); fixes = 0; if (rem.length) setPhase('scrambling'); else enterPractice(); } // still the same practice position
+  else if (phase === 'practice') { enterPractice(); toast('Turns were missed over Bluetooth. The coach started again from where your cube is now.'); }
   else if (phase === 'scrambling' || phase === 'ready') newScramble();
   if (activeTab === 'cross' && cx.target && (cx.phase === 'scrambling' || cx.phase === 'nocube')) cxArm();
+  else if (activeTab === 'cross' && cx.target && (cx.phase === 'inspect' || cx.phase === 'running')) { cancelAnimationFrame(cx.raf); toast('Turns were missed over Bluetooth, so this cross starts over.'); cxArm(); }
   if (activeTab === 'timer') {
     if (tm.phase === 'scrambling') { tm.rem = pathBetween(cur, tm.target); if (!tm.rem.length) tInspect(); else renderTimer(); }
     else if (tm.phase === 'inspect') tm.start = E.clone(cur);
@@ -2721,8 +2798,22 @@ function onResync(){
   if (activeTab === 'rxd' && rd.target && rd.phase !== 'idle') { if (rd.phase === 'running') toast('Turns were missed over Bluetooth, so this drill starts over.'); rdArm(); }
 }
 let battery = null, hwName = null;
+// A solve that was running when the cube went away cannot be trusted (turns are missing), and its
+// clock would keep running while we try to reconnect: stop it and say so.
+function dropSolveOnDisconnect(){
+  let dropped = false;
+  if (phase === 'solving') { cancelAnimationFrame(rafId); newScramble(); dropped = true; }
+  if (tm.phase === 'running' || tm.phase === 'inspect' || tm.phase === 'scrambling') { dropped = dropped || tm.phase === 'running'; cancelAnimationFrame(tm.raf); tm.phase = 'idle'; if (activeTab === 'timer') tNewScramble(); }
+  if (rx.phase === 'running' || rx.phase === 'inspect' || rx.phase === 'scrambling') { dropped = dropped || rx.phase === 'running'; cancelAnimationFrame(rx.raf); rx.phase = 'idle'; if (activeTab === 'roux') rxNew(); }
+  if (cx.phase === 'running' || cx.phase === 'inspect' || cx.phase === 'scrambling') { dropped = dropped || cx.phase === 'running'; cancelAnimationFrame(cx.raf); if (activeTab === 'cross' && cx.target) cxArm(); else cx.phase = 'idle'; }
+  if (rd.phase === 'running' || rd.phase === 'inspect' || rd.phase === 'scrambling') { dropped = dropped || rd.phase === 'running'; cancelAnimationFrame(rd.raf); if (activeTab === 'rxd' && rd.target) rdArm(); else rd.phase = 'idle'; }
+  if (dr.phase === 'running') { dr.phase = 'idle'; if (activeTab === 'tricks') drillArm(); }
+  if (dropped) toast('The cube disconnected in the middle of a solve, so that solve was not saved.');
+}
 function setConn(on){
+  on = !!(on && conn); // never show "connected" without a connection
   $('dot').classList.toggle('on', on);
+  if (setConn.last !== on) { setConn.last = on; if (activeTab === 'tricks') setTimeout(() => { if (activeTab === 'tricks' && dr.phase !== 'running') renderTricks(); }, 0); }
   $('btnConnect').textContent = on ? 'Disconnect' : reconn ? 'Stop reconnecting' : 'Connect cube';
   if (on && activeTab === 'cross' && cx.phase === 'nocube' && cx.target) setTimeout(cxArm, 0);
   if (on && activeTab === 'roux' && rx.phase === 'nocube') setTimeout(rxNew, 0);
@@ -2765,7 +2856,8 @@ function resyncNow(){
   forceSync = true; syncRetries = 0; clearTimeout(syncRetryT); clearTimeout(idleSyncT);
   syncRequestAt = moveCounter; btNote({ ev: 'resync-button' });
   conn.sendCubeCommand({ type: 'REQUEST_FACELETS' }).catch(() => {});
-  setTimeout(() => { if (forceSync) { forceSync = false; toast('The cube did not answer. Turn a face to wake it and try again.'); } }, 3000);
+  clearTimeout(resyncNow._t);
+  resyncNow._t = setTimeout(() => { if (forceSync) { forceSync = false; toast('The cube did not answer. Turn a face to wake it and try again.'); } }, 3000);
 }
 function onCubeEvent(ev){
   if (ev.type === 'MOVE' || ev.type === 'FACELETS') btNote({ ev: ev.type, s: ev.serial, m: ev.move, last: lastMoveSerial });
@@ -2821,6 +2913,8 @@ function onCubeEvent(ev){
   else if (ev.type === 'HARDWARE') { if (/^[\x20-\x7e]+$/.test(ev.hardwareName || '')) hwName = ev.hardwareName; if (conn) setConn(true); }
   else if (ev.type === 'DISCONNECT') {
     conn = null; clearTimeout(idleSyncT); clearTimeout(macTimer);
+    hwName = null; battery = null; // the next cube must not show this one's name and charge
+    dropSolveOnDisconnect();
     if (wantConn && lastDevice && !reconn) startReconnect(); else { setConn(false); if (!reconn) toast('Cube disconnected.'); }
   }
 }
@@ -2842,8 +2936,10 @@ function queueVirtual(str, gap, pauseBefore){
   };
   if (!vTimer && vq.length) vTimer = setTimeout(step, 0);
 }
+let demoRun = false;
 function demoSolve(){
   if (!tablesReady) { toast('The pair solver is still loading. Try again in a few seconds.'); return; }
+  if (demoRun && (vTimer || phase === 'solving')) { toast('A demo solve is already running.'); return; }
   let s = cur, seq = [];
   if (phase === 'scrambling') { seq = rem.map(tokText); s = target; }
   if (!E.crossSolved(s)) { toast('Demo needs a scramble in progress.'); return; }
@@ -2856,6 +2952,7 @@ function demoSolve(){
     s = E.applyMoves(s, ms); keep.push(j);
     solveSeq.push(ms.map(E.moveName).join(' '));
   }
+  demoRun = true;
   queueVirtual(seq.join(' '), 25);
   const wait = () => { if (vTimer || !['ready', 'solving', 'practice'].includes(phase)) { setTimeout(wait, 100); return; } solveSeq.forEach((p, i) => queueVirtual(p, 120 + Math.round(Math.random() * 60), i === 0 ? 400 : 500 + Math.round(Math.random() * 700))); };
   wait();
@@ -3337,8 +3434,9 @@ function learnOwnWay(c, ok, htm){
 }
 // ---- drill a set: rotate through cards you pick (e.g. the G perms), random order, alg shown or hidden ----
 function drillKey(){ return ll.tabSet === 'F2L' ? 'F2L' : ll.tabSet === 'CMLL' ? 'CMLL' : 'LL'; }
-function drillSel(){ settings.drillSets = settings.drillSets || {}; return (settings.drillSets[drillKey()] || []).filter(id => LLCARDS.some(c => c.id === id)); }
-function drillSetSel(ids){ settings.drillSets = settings.drillSets || {}; settings.drillSets[drillKey()] = ids; store.set('settings', settings); }
+function drillSel(){ settings.drillSets = settings.drillSets || {}; return (settings.drillSets[drillKey()] || []).filter(id => LLCARDS.some(c => c.id === id && inSets(c))); }
+// OLL and PLL share one saved list: only the set on screen is shown and changed, the other is kept.
+function drillSetSel(ids){ settings.drillSets = settings.drillSets || {}; const other = (settings.drillSets[drillKey()] || []).filter(id => { const c = LLCARDS.find(x => x.id === id); return c && !inSets(c); }); settings.drillSets[drillKey()] = other.concat(ids); store.set('settings', settings); }
 function drillPicking(){ const b = $('drillBox'); return !!(b && b.open); }
 function drillToggle(ids){
   const sel = drillSel();
@@ -3455,9 +3553,14 @@ function learnFinish(r){
       st.known = true; st.interval = 0; st.due = Date.now() + 10 * 60e3; st.reps++;
       if (st.hist.length > 30) st.hist.splice(0, st.hist.length - 30);
       saveLL(); renderDeck();
-      toast('Passed: 3 in a row on ' + c.name + '. It comes back for review in about 10 minutes.');
+      { // say how the card rates against your other cards of this set, since that decides how often it comes up
+        const a = avg(recentTimes(c.id)), tg = setTarget(c.set), q = a == null ? null : a / tg;
+        const rate = q == null ? '' : q > 1.25 ? ' It rates as hard for now (' + fmt(a) + ' s against your usual ' + fmt(tg) + ' s), so it will come up often.'
+          : q > 0.9 ? ' It rates as medium (' + fmt(a) + ' s, about your usual ' + fmt(tg) + ' s).' : ' It rates as easy (' + fmt(a) + ' s against your usual ' + fmt(tg) + ' s), so it will come up less often.';
+        toast('Passed: 3 in a row on ' + c.name + '. It is now ticked as known.' + rate);
+      }
       ll.learnFlow = false; ll.test = null; ll.phase = 'between'; renderLL();
-      setTimeout(nextCard, 900);
+      { const c0 = ll.card; setTimeout(() => { if (ll.card === c0 && ll.phase === 'between') nextCard(); }, 900); }
       return;
     }
   } else {
@@ -3722,7 +3825,17 @@ function renderDeck(){
     const score = (c) => { const fs = f2lSeenStats(c); return fs ? (order === 'seen' ? fs.n : order === 'slow' ? (fs.t || 0) : (fs.extra ?? -9) + fs.n * 0.001) : -99; };
     if (order !== 'list') cards = cards.slice().sort((a, b) => score(b) - score(a));
   }
-  $('deck').innerHTML = cards.map(c => {
+  // group headings (as on the alg sheets) whenever the cards are in list order
+  let grp = cards.map(cardGroup);
+  const headed = (!isF2L || (settings.f2lSort || 'worst') === 'list') && new Set(grp).size > 1;
+  if (headed) { // keep each group together, groups in the order they first appear
+    const first = {}; grp.forEach((g, i) => { if (!(g in first)) first[g] = i; });
+    cards = cards.map((c, i) => [c, i]).sort((a, b) => (first[grp[a[1]]] - first[grp[b[1]]]) || a[1] - b[1]).map(x => x[0]);
+    grp = cards.map(cardGroup);
+  }
+  $('deck').innerHTML = cards.map((c, ci) => {
+    let head = '';
+    if (headed && (ci === 0 || grp[ci] !== grp[ci - 1])) { const gc = cards.filter((x, i) => grp[i] === grp[ci]); head = '<div class="deckhead">' + esc(String(grp[ci]).replace(/^F2L: /, '')) + '<span>' + gc.filter(x => stat(x.id).known).length + ' of ' + gc.length + ' known</span></div>'; }
     const st = stat(c.id), a = avg(recentTimes(c.id));
     const ratio = a != null ? a / setTarget(c.set) : null;
     const colr = ratio == null ? 'var(--line)' : ratio > 1.25 ? 'var(--bad)' : ratio > 0.9 ? 'var(--warn)' : 'var(--good)';
@@ -3730,7 +3843,7 @@ function renderDeck(){
     let meta = !st.known ? 'not learned' : a == null ? 'no times yet' : fmt(a) + ' s' + (mr ? ' · <b style="color:var(--warn)">' + Math.round(mr * 100) + '% slips</b>' : '');
     if (c.set !== 'F2L') { const ss = solveStats(c); if (ss) meta += (st.known ? ' · ' : ' · ') + 'in solves ' + fmt(ss.t) + ' s'; }
     if (c.set === 'F2L') { const fs = f2lSeenStats(c); if (fs) meta = 'seen ' + fs.n + '×' + (fs.extra != null ? ' · <b style="color:' + (fs.extra > 1.5 ? 'var(--bad)' : fs.extra > 0.3 ? 'var(--warn)' : 'var(--good)') + '">' + (fs.extra > 0 ? '+' : '') + fs.extra.toFixed(1) + '</b>' : ''); }
-    return '<div class="tile' + (st.known || c.set === 'F2L' ? '' : ' unknown') + (ll.card && ll.card.id === c.id ? ' cur' : '') + (drillPicking() && drillSel().includes(c.id) ? ' insel' : '') + '" data-card="' + c.id + '" role="button" tabindex="0" title="' + esc(tileTip(c)) + '">' +
+    return head + '<div class="tile' + (st.known || c.set === 'F2L' ? '' : ' unknown') + (ll.card && ll.card.id === c.id ? ' cur' : '') + (drillPicking() && drillSel().includes(c.id) ? ' insel' : '') + '" data-card="' + c.id + '" role="button" tabindex="0" title="' + esc(tileTip(c)) + '">' +
       '<label title="I know this case"><input type="checkbox" data-known="' + c.id + '"' + (st.known ? ' checked' : '') + ' aria-label="I know ' + esc(c.name) + '"></label>' +
       caseSVG(cardCase(c), cardSvgSet(c), 64) + '<span class="tname">' + esc(c.set === 'CMLL' ? c.name : c.set === 'PLL' ? c.name.replace(' perm', '') : '#' + c.name.split(' ')[1]) + '</span>' +
       '<span class="tmeta">' + meta + '</span><span class="spd"><i style="width:' + (ratio == null ? 0 : Math.min(100, 100 / Math.max(ratio, 0.5) / 2)) + '%;background:' + colr + '"></i></span></div>';
@@ -3772,10 +3885,10 @@ function algEditHtml(c){
   const picks = [];
   if (ll.card === c && ll.lastDone) picks.push([ll.lastDone, 'What you just did']);
   for (const m of st.mine || []) if (!picks.some(x => x[0] === m)) picks.push([m, 'A way you do it']);
-  const pickHtml = picks.filter(([a]) => a !== cardAlg(c)).map(([a, lbl]) => '<div class="row" style="margin-top:6px;gap:6px"><span class="hint">' + lbl + ':</span><code>' + esc(a) + '</code><button class="mini" data-usealg="' + esc(a) + '">Use this</button></div>').join('');
+  const pickHtml = picks.filter(([a]) => a !== cardAlg(c)).map(([a, lbl]) => '<div class="row" style="margin-top:6px;gap:6px"><span class="hint">' + lbl + ':</span><code>' + esc(a) + '</code><button class="mini" data-usealg="' + esc(a) + '">Use this</button>' + ((st.mine || []).includes(a) ? '<button class="mini" data-forgetalg="' + esc(a) + '">Forget</button>' : '') + '</div>').join('');
   return '<details class="algedit"' + (pickHtml && ll.lastDone && ll.result && ll.result.errs ? ' open' : '') + '><summary>Use a different alg for ' + esc(c.name) + '</summary>' + pickHtml + '<div class="row" style="margin-top:6px">' +
     '<input type="text" id="algEditInput" value="' + esc(cardAlg(c)) + '" spellcheck="false" autocomplete="off"><button class="mini" id="algEditSave">Save</button>' +
-    (st.alg ? '<button class="mini" id="algEditReset">Back to built-in</button>' : '') + '</div><p class="hint" id="algEditMsg" style="margin:4px 0 0">Built-in: <code>' + esc(trigText(c.alg)) + '</code></p></details>';
+    (st.alg || (st.mine || []).length ? '<button class="mini" id="algEditReset" title="Removes your alg and the ways Slotwise has seen you do this case">Back to built-in</button>' : '') + '</div><p class="hint" id="algEditMsg" style="margin:4px 0 0">Built-in: <code>' + esc(trigText(c.alg)) + '</code></p></details>';
 }
 function saveCardAlg(c, text){
   const t = String(text || '').trim();
@@ -3792,10 +3905,10 @@ function saveCardAlg(c, text){
   if (hit.id !== c.id) return 'That alg solves ' + hit.name + ', not ' + c.name + '.';
   stat(c.id).alg = (t === c.alg) ? undefined : t; saveLL(); return null;
 }
-function importCardAlgs(text){
+function importCardAlgs(text, dry){
   const lines = String(text || '').split(/\n|\s{3,}|\t/);
   const done = new Set(), unmatched = [];
-  let n = 0;
+  let n = 0, replaced = 0;
   for (const raw of lines) {
     const words = raw.replace(/[()\[\]{}]/g, ' ').replace(/[’`´]/g, "'").trim().split(/\s+/);
     let best = [], run = [];
@@ -3805,17 +3918,19 @@ function importCardAlgs(text){
     const c = cardForAlg(alg);
     if (!c) { unmatched.push(alg); continue; }
     if (done.has(c.id)) continue; // first alg listed for a case wins
-    done.add(c.id); stat(c.id).alg = (alg === c.alg) ? undefined : alg; n++;
+    done.add(c.id); n++;
+    const had = stat(c.id).alg; if (had && had !== alg) replaced++;
+    if (!dry) stat(c.id).alg = (alg === c.alg) ? undefined : alg;
   }
-  saveLL();
-  return { n, unmatched };
+  if (!dry) saveLL();
+  return { n, unmatched, replaced };
 }
 function nextCard(){
   if (ll.drill) { drillNext(); return; }
   if (ll.learnFlow) { ll.learnFlow = false; ll.test = null; ll.phase = 'idle'; }
-  else if (ll.phase === 'running' && !ll.revealed) { llFinish(false); }
+  else if (ll.phase === 'running' && !ll.revealed && ll.moves && ll.moves.length) { llFinish(false); } // skipping an untouched card is not a miss
   const p = pickNext();
-  if (!p) { toast('No cards yet. Tick the cases you know, or press New card.'); return; }
+  if (!p) { ll.card = null; ll.phase = 'idle'; renderLL(); renderDeck(); toast('No cards yet. Tick the cases you know, or press New card.'); return; }
   presentCard(p.card, { extra: p.extra });
 }
 // --- how often each case comes up (exact, by enumerating every last-layer state) ---
@@ -3893,7 +4008,7 @@ function poolCards(){
   if (P.order === 'freq') cs.sort((a, b) => (a.set === 'CMLL' && b.set === 'CMLL' ? ({ oc: 0, cp: 1, full: 2 }[a.w]) - ({ oc: 0, cp: 1, full: 2 }[b.w]) : 0) || (f[b.id] || 0) - (f[a.id] || 0));
   else if (P.order === 'mine') cs.sort((a, b) => (a.set === 'F2L' ? ((f2lSeenStats(b) || {}).n || 0) - ((f2lSeenStats(a) || {}).n || 0) : seenInSolves(b) - seenInSolves(a)) || (f[b.id] || 0) - (f[a.id] || 0));
   else if (P.order === 'worst') cs.sort((a, b) => (((f2lSeenStats(b) || {}).extra ?? -9) - ((f2lSeenStats(a) || {}).extra ?? -9)) || (f[b.id] || 0) - (f[a.id] || 0));
-  else if (P.order === 'random') cs.sort(() => Math.random() - 0.5);
+  else if (P.order === 'random') { const r = poolCards.rank || (poolCards.rank = {}); for (const c of cs) if (r[c.id] == null) r[c.id] = Math.random(); cs.sort((a, b) => r[a.id] - r[b.id]); } // one shuffle, so "Next new card" is the card you get
   return cs;
 }
 function inSetsTab(c){ return inSets(c); }
@@ -3901,7 +4016,7 @@ function renderPool(){
   const P = poolSettings(), f = caseFreq();
   const groups = [];
   for (const c of LLCARDS) { if (!inSetsTab(c)) continue; const g = cardGroup(c); let e = groups.find(x => x.name === g); if (!e) groups.push(e = { name: g, cards: [] }); e.cards.push(c); }
-  $('poolOrder').querySelector('[value="worst"]').hidden = ll.tabSet !== 'F2L';
+  { const o = $('poolOrder').querySelector('[value="worst"]'); o.hidden = o.disabled = ll.tabSet !== 'F2L'; } // Safari ignores hidden on options
   $('algsBox').hidden = ll.tabSet !== 'LL';
   groups.sort((x, y) => (x.name.startsWith('PLL') ? 0 : 1) - (y.name.startsWith('PLL') ? 0 : 1));
   $('poolOrder').value = P.order;
@@ -3917,7 +4032,6 @@ function renderPool(){
 function newCard(){
   const c = poolCards().filter(inSetsTab)[0];
   if (!c) { toast(poolSettings().groups.length ? 'Everything in your pool is learned. Tick more groups under New card pool.' : 'You know every case in this set.'); return; }
-  stat(c.id).known = true; saveLL();
   presentCard(c, { learning: true });
 }
 // ---- drills: one top-level tab, with a sub-nav per method ----
@@ -3958,6 +4072,7 @@ function renderDrillNav(){
 function setTab(t){
   if (t === 'drills') { const m = curMethod(); const last = (settings.drillSub || {})[m]; return goSub(DRILL_SUBS[m].some(([k]) => k === last) ? last : m === 'roux' ? rd.kind : 'f2l'); }
   if (t === 'rxd' && rd.kind === 'cmll' && cmMode() === 'cards') t = 'cmllc';
+  if (t === activeTab && t === 'timer' && tm.phase !== 'idle') return; // already here: keep the scramble or the running solve
   const prev = activeTab;
   activeTab = t;
   if (TAB_METHOD[t] !== 'both' && TAB_METHOD[t] !== curMethod()) { settings.method = TAB_METHOD[t]; store.set('settings', settings); }
@@ -3975,17 +4090,21 @@ function setTab(t){
   }
   renderDrillNav();
   if (prev === 'f2l' && t !== 'f2l') { if (phase === 'solving') cancelAnimationFrame(rafId); practice = null; }
-  if (isLLTab(prev) && t !== prev) { ll.phase = ll.phase === 'running' || ll.phase === 'scrambling' || ll.phase === 'between' ? 'idle' : ll.phase; ll.learnFlow = false; ll.test = null; }
+  if (isLLTab(prev) && t !== prev) { // leaving a card half-way drops it, and a drill ends with its tab
+    if (ll.phase === 'running' || ll.phase === 'scrambling' || ll.phase === 'between') { ll.phase = 'idle'; ll.card = null; }
+    ll.learnFlow = false; ll.test = null; ll.drill = null;
+  }
   if (llLike) { const ts = t === 'f2lc' ? 'F2L' : t === 'cmllc' ? 'CMLL' : 'LL'; if (ll.tabSet !== ts) { ll.tabSet = ts; ll.card = null; ll.phase = 'idle'; } }
-  if (prev === 'timer' && t !== 'timer') { cancelAnimationFrame(tm.raf); tm.phase = 'idle'; }
+  if (prev === 'timer' && t !== 'timer') { if (tm.phase === 'running' || tm.phase === 'manual-running') toast('Timer solve stopped. It wasn\'t saved.'); cancelAnimationFrame(tm.raf); clearTimeout(tm.holdT); tm.phase = 'idle'; }
   if (prev === 'cross' && t !== 'cross') { cancelAnimationFrame(cx.raf); cx.phase = 'idle'; }
+  if (prev === 'tricks' && t !== 'tricks' && (dr.phase === 'ready' || dr.phase === 'running')) dr.phase = 'idle';
   if (llLike) { renderLL(); renderDeck(); }
   else if (t === 'timer') { tNewScramble(); renderTimerStats(); renderSolveDetail(); }
   else if (t === 'plan') { renderPlan(); }
   else if (t === 'cross') { if (cx.target && cx.phase === 'idle' && cx.attempt > 1) cxArm(); else cxNewScramble(); renderCrossStats(); }
   else if (t === 'tricks') { if (dr.phase === 'idle' || dr.phase === 'done') drillArm(); else renderTricks(); }
-  else if (t === 'roux') { withFB($('rxBox'), () => { if (activeTab !== 'roux') return; if (rxIsSlow()) withLSE($('rxBox'), () => { if (activeTab === 'roux') rxNew(); }); else rxNew(); }); renderRxStats(); }
-  else if (t === 'rxd') { rdNew(); renderRdStats(); }
+  else if (t === 'roux') { if (solverReady) withFB($('rxBox'), () => { if (activeTab !== 'roux') return; if (rxIsSlow()) withLSE($('rxBox'), () => withSB($('rxBox'), () => { if (activeTab === 'roux') rxNew(); })); else rxNew(); }); renderRxStats(); }
+  else if (t === 'rxd') { if (solverReady) rdNew(); renderRdStats(); }
   else if (solverReady) newScramble();
   try { sessionStorage.setItem('slotwise.tab', t); } catch (e) {}
   try { if (runState()) renderRunBar(); } catch (e) {}
@@ -4267,7 +4386,7 @@ function llHintCase(st){
   return PLL_BY_KEY.get(canonPerm(st)) || null;
 }
 function llHintPath(c, st){
-  const alg = (stat(c.id).mine || [])[0] || cardAlg(c);
+  const s0 = stat(c.id), alg = s0.alg || (s0.mine || [])[0] || cardAlg(c); // an alg you chose beats one that was only observed
   const done = (x) => { if (!E.f2lSolved(x)) return false; if (c.set === 'OLL') return [0, 1, 2, 3].every(i => !x.co[i] && !x.eo[i]); return [0, 1, 2, 3].some(u => E.equal(E.applyMoves(x, u ? [u - 1] : []), E.solved())); };
   let best = null;
   for (let k = 0; k < 4; k++) for (let a = 0; a < 4; a++) {
@@ -4350,23 +4469,31 @@ function tFinish(){
 // spacebar timer when no smart cube is connected
 function tKey(e, down){
   if (activeTab !== 'timer' || conn) return;
-  if (e.key !== ' ' || e.target.closest('input,textarea,select')) return;
+  if (!e.target.closest || e.target.closest('input,textarea,select')) return;
+  // any key stops a running solve; everything else is the space bar
+  const anyStop = down && tm.phase === 'manual-running' && !e.ctrlKey && !e.metaKey && !e.altKey && !['Shift', 'Control', 'Alt', 'Meta', 'Tab'].includes(e.key);
+  if (e.key !== ' ' && !anyStop) return;
   e.preventDefault();
+  if (down && e.repeat) return;
+  tPress(down);
+}
+// The same hold-and-release timer for the space bar and for a finger (or mouse) on the time.
+function tPress(down){
   if (down) {
-    if (e.repeat) return;
     if (tm.phase === 'manual-running') {
       cancelAnimationFrame(tm.raf);
       const t = performance.now() - tm.t0;
       const rec = { id: Date.now(), date: new Date().toISOString(), time: Math.round(t), penalty: '', scramble: tm.scramble, manual: true };
-      rec.session = curSess('timer'); tAll.unshift(rec); refreshTimerView(); saveSolves(); tm.viewId = rec.id; tm.phase = 'manual-stopped';
+      rec.session = curSess('timer'); tAll.unshift(rec); refreshTimerView(); saveSolves(); tm.viewId = rec.id; tm.phase = 'manual-stopped'; tm.stopAt = performance.now();
       renderTimer(); renderTimerStats(); renderSolveDetail();
       return;
     }
-    if (tm.phase === 'manual-idle' || tm.phase === 'manual-stopped') { tm.keyDown = performance.now(); tm.phase = 'manual-hold'; renderTimer(); setTimeout(() => { if (tm.phase === 'manual-hold') { tm.phase = 'manual-armed'; renderTimer(); } }, 300); }
+    // after a solve, the next press brings the next scramble (never a second solve on the old one)
+    if (tm.phase === 'manual-stopped') { if (performance.now() - (tm.stopAt || 0) > 400) tNewScramble(); return; }
+    if (tm.phase === 'manual-idle') { tm.keyDown = performance.now(); tm.phase = 'manual-hold'; renderTimer(); clearTimeout(tm.holdT); tm.holdT = setTimeout(() => { if (tm.phase === 'manual-hold') { tm.phase = 'manual-armed'; renderTimer(); } }, 300); }
   } else {
     if (tm.phase === 'manual-armed') { tm.phase = 'manual-running'; tm.t0 = performance.now(); renderTimer(); tLoop(); }
-    else if (tm.phase === 'manual-hold') { tm.phase = 'manual-idle'; renderTimer(); }
-    else if (tm.phase === 'manual-stopped') { /* key released after stopping */ }
+    else if (tm.phase === 'manual-hold') { clearTimeout(tm.holdT); tm.phase = 'manual-idle'; renderTimer(); }
   }
 }
 function tManualNext(){ if (tm.phase === 'manual-stopped') tNewScramble(); }
@@ -4390,7 +4517,7 @@ function renderTimer(){
     const last = tSolves[0];
     html = '<p class="eyebrow">Scramble</p><p class="llalg">' + esc(tm.scramble) + '</p>' +
       '<div class="timer' + cls + '" id="tTime">' + (tm.phase === 'manual-stopped' && last ? fmtT(last.time) : tm.phase === 'manual-running' ? '0.00' : '0.00') + '</div>' +
-      '<p class="hint">' + (tm.phase === 'manual-running' ? 'Press space to stop.' : tm.phase === 'manual-stopped' ? 'Saved. Press Next scramble when you\'re ready.' : 'Hold space until the time turns green, then let go to start. Connect your cube to have it time itself and split your solve.') + '</p>' +
+      '<p class="hint">' + (tm.phase === 'manual-running' ? 'Press any key or tap here to stop.' : tm.phase === 'manual-stopped' ? 'Saved. Press space, tap the time or use Next scramble when you\'re ready.' : 'Hold space (or press and hold the time) until it turns green, then let go to start. Connect your cube to have it time itself and split your solve.') + '</p>' +
       (tm.phase === 'manual-stopped' ? '<div class="row"><button class="primary" id="tNext">Next scramble</button></div>' : '');
   } else if (tm.phase === 'done') {
     html = '<p class="eyebrow">Solved</p><div class="timer">' + fmtSolve(tSolves[0]) + '</div>';
@@ -4416,7 +4543,7 @@ function renderTimerStats(){
     const sp = s.split || [];
     const g = (k) => { const x = sp.find(y => y.n === k); return x ? fmtT(x.t) : ''; };
     const cs = (k) => { const x = sp.find(y => y.n === k); return x && x.c ? x.c.replace('OLL ', '') : ''; };
-    return '<tr data-sid="' + s.id + '"' + (s.id === tm.viewId ? ' class="sel"' : '') + '><td>' + n + '</td><td><b>' + fmtSolve(s) + '</b></td><td>' + fmtT(aoN(tSolves.slice(i), 5)) + '</td><td>' + fmtT(aoN(tSolves.slice(i), 12)) + '</td>' +
+    return '<tr data-sid="' + s.id + '" tabindex="0"' + (s.id === tm.viewId ? ' class="sel"' : '') + '><td>' + n + '</td><td><b>' + fmtSolve(s) + '</b></td><td>' + fmtT(aoN(tSolves.slice(i), 5)) + '</td><td>' + fmtT(aoN(tSolves.slice(i), 12)) + '</td>' +
       '<td>' + g('Cross') + '</td><td>' + g('F2L') + '</td><td>' + g('OLL') + (cs('OLL') ? ' <span class="hint">' + esc(cs('OLL')) + '</span>' : '') + '</td><td>' + g('PLL') + (cs('PLL') ? ' <span class="hint">' + esc(cs('PLL')) + '</span>' : '') + '</td></tr>';
   }).join('') : '<tr><td colspan="8" style="font-family:var(--sans);color:var(--muted)">No solves yet.</td></tr>';
 }
@@ -4429,6 +4556,7 @@ function renderTimerChart(){
   const vals = pts.map(effTime);
   const ao5 = pts.map((_, i) => { const idx = tSolves.length - 1 - (n0 + i); return aoN(tSolves.slice(idx), 5); });
   const fin = vals.concat(ao5).filter(v => v != null && isFinite(v));
+  if (!fin.length) { el.innerHTML = '<p class="hint">No finished solves to chart yet (only DNFs so far).</p>'; return; }
   let lo = Math.min(...fin), hi = Math.max(...fin);
   const pad = (hi - lo) * 0.1 || 500; lo = Math.max(0, lo - pad); hi += pad;
   const X = (i) => padL + (W - padL - padR) * (pts.length === 1 ? 0.5 : i / (pts.length - 1));
@@ -4486,7 +4614,6 @@ function redoFromTimer(sid, key){
     ll.sets = settings.llSets = card.set; store.set('settings', settings);
     setTab('ll');
     const learning = !stat(card.id).known;
-    if (learning) { stat(card.id).known = true; saveLL(); }
     presentCard(card, { learning, state: pos, from: 'timer solve ' + n });
   }
 }
@@ -4561,23 +4688,33 @@ function renderSolveDetail(){
 // You say how long you have; Slotwise scores each area from your own data (timer solves, F2L solves,
 // cards, cross drills, finger-trick drills), discounts what you practised in the last few days, and
 // builds a session of short blocks. The runner then walks you through it with a countdown.
-const PLAN = {
-  baseline: { solve: 51.0, cross: 6.0, f2l: 25.5, look: 2.7, pause: 2.2, moves: 10.0, stuck: 30 },
-};
 const EX = {
-  warm:   { name: 'Warm-up', tab: 'timer', sess: ['timer', 'Main'], what: '2 or 3 normal solves to get going. Don\'t judge the times.' },
-  slow:   { name: 'Slow lookahead', tab: 'f2l', sess: ['f2l', 'Slow lookahead'], what: 'F2L solves where your hands never stop. Find the next pair before each insert; if you stop, go slower.' },
-  pairs:  { name: 'Pair choice', tab: 'f2l', sess: ['f2l', 'F2L normal'], what: 'Full-speed F2L solves. After each, read any "Easier pair available" and redo it with Practice this scramble, choosing the easier pair.' },
-  f2lc:   { name: 'Weak F2L cases', tab: 'f2lc', act: 'f2lc', what: 'Work down the list from the top (most extra moves): Practise it, then Test me.' },
-  cross:  { name: 'Cross drill', tab: 'cross', what: 'Plan the whole cross in inspection, then do it in one go. Repeat until optimal.' },
-  llrev:  { name: 'OLL & PLL review', tab: 'll', act: 'review', what: 'Press Next card each time: your slowest cards and the ones you slip on come up most.' },
-  llnew:  { name: 'Learn a new alg', tab: 'll', act: 'new', what: 'New card from your pool: practise it with the alg shown until it flows, then pass Test me. Use any time left to review.' },
-  tricks: { name: 'Finger tricks', tab: 'tricks', what: 'Sexy move and inserts first, then a trigger from an alg you find slow. Clean and even before fast.' },
+  warm:   { m: 'cfop', name: 'Warm-up', tab: 'timer', sess: ['timer', 'Main'], what: '2 or 3 normal solves to get going. Don\'t judge the times.' },
+  slow:   { m: 'cfop', name: 'Slow lookahead', tab: 'f2l', sess: ['f2l', 'Slow lookahead'], what: 'F2L solves where your hands never stop. Find the next pair before each insert; if you stop, go slower.' },
+  pairs:  { m: 'cfop', name: 'Pair choice', tab: 'f2l', sess: ['f2l', 'F2L normal'], what: 'Full-speed F2L solves. After each, read any "Easier pair available" and redo it with Practice this scramble, choosing the easier pair.' },
+  f2lc:   { m: 'cfop', name: 'Weak F2L cases', tab: 'f2lc', act: 'f2lc', what: 'Work down the list from the top (most extra moves): Practise it, then Test me.' },
+  cross:  { m: 'cfop', name: 'Cross drill', tab: 'cross', what: 'Plan the whole cross in inspection, then do it in one go. Repeat until optimal.' },
+  llrev:  { m: 'cfop', name: 'OLL & PLL review', tab: 'll', act: 'review', what: 'Press Next card each time: your slowest cards and the ones you slip on come up most.' },
+  llnew:  { m: 'cfop', name: 'Learn a new alg', tab: 'll', act: 'new', what: 'New card from your pool: practise it with the alg shown until it flows, then pass Test me. Use any time left to review.' },
+  tricks: { m: 'cfop', name: 'Finger tricks', tab: 'tricks', what: 'Sexy move and inserts first, then a trigger from an alg you find slow. Clean and even before fast.' },
   rest:   { name: 'Break', what: 'Put the cube down, shake out your hands and look away from the screen. Press Next step when the time is up.' },
-  solves: { name: 'Timed solves', tab: 'timer', sess: ['timer', 'Main'], what: 'Normal solves at full speed. These are the numbers that track your progress.' },
+  solves: { m: 'cfop', name: 'Timed solves', tab: 'timer', sess: ['timer', 'Main'], what: 'Normal solves at full speed. These are the numbers that track your progress.' },
 };
-const EX_ORDER = ['warm', 'cross', 'slow', 'pairs', 'f2lc', 'tricks', 'llnew', 'llrev', 'solves'];
-const AREA_OF = { warm: null, rest: null, slow: 'lookahead', pairs: 'pairs', f2lc: 'f2lcases', cross: 'cross', llrev: 'll', llnew: 'learn', tricks: 'tricks', solves: 'solves' };
+// Roux exercises. sub: the drill to open; slow: which timer mode; trig: the finger-trick drill to load.
+Object.assign(EX, {
+  rwarm:   { m: 'roux', name: 'Warm-up', tab: 'roux', slow: false, what: '2 or 3 normal solves to get going. Don\'t judge the times.' },
+  rfb:     { m: 'roux', name: 'First block', tab: 'rxd', sub: 'fb', what: 'Plan the whole block before you turn, then build it on the bottom left without stopping.' },
+  rsb:     { m: 'roux', name: 'Second block', tab: 'rxd', sub: 'sb', what: 'Build the second block with R, r, U and M only. Find the next piece while you place this one.' },
+  rcmll:   { m: 'roux', name: 'Corners (CMLL)', tab: 'rxd', sub: 'cmll', what: 'Recognise the case, then do the alg without a pause.' },
+  rlse:    { m: 'roux', name: 'Last six edges', tab: 'rxd', sub: 'lse', what: 'Orient the edges, place UL and UR, then finish. Keep the M turns even.' },
+  rslow:   { m: 'roux', name: 'Slow solves (fewest moves)', tab: 'roux', slow: true, what: 'Solve with no clock pressure, then compare each step with the shortest solution shown.' },
+  rtricks: { m: 'roux', name: 'M-turn finger tricks', tab: 'tricks', trig: "M' U M U'", what: 'M\' U M U\' first, then M2 U2. Clean and even before fast.' },
+  rsolves: { m: 'roux', name: 'Timed solves', tab: 'roux', slow: false, what: 'Normal solves at full speed. These are the numbers that track your progress.' },
+});
+const EX_ORDER = ['warm', 'cross', 'slow', 'pairs', 'f2lc', 'tricks', 'llnew', 'llrev', 'solves', 'rwarm', 'rfb', 'rsb', 'rcmll', 'rlse', 'rtricks', 'rslow', 'rsolves'];
+const AREA_OF = { warm: null, rest: null, slow: 'lookahead', pairs: 'pairs', f2lc: 'f2lcases', cross: 'cross', llrev: 'll', llnew: 'learn', tricks: 'tricks', solves: 'solves',
+  rwarm: null, rfb: 'rfb', rsb: 'rsb', rcmll: 'rcmll', rlse: 'rlse', rslow: 'rmoves', rtricks: 'rtricks', rsolves: 'rsolves' };
+const isWarm = (s) => s.ex === 'warm' || s.ex === 'rwarm';
 function planState(){ return settings.practice || (settings.practice = { mins: 30, seed: 1 }); }
 let practiceLog = store.get('practice', []);
 function savePracticeLog(){ if (practiceLog.length > 500) practiceLog.splice(0, practiceLog.length - 500); store.set('practice', practiceLog); }
@@ -4609,36 +4746,89 @@ function pairInfo(s){
   return info;
 }
 // Main timer solves from the last 7 days (or your last 30 if there are fewer than 10 this week)
+const mainSolves = () => tAll.filter(s => (s.session || 'main') === 'main' && s.split && s.split.length);
 function recentMain(){
-  const main = tAll.filter(s => (s.session || 'main') === 'main' && s.split && s.split.length);
+  const main = mainSolves();
   const wk = main.filter(s => new Date(s.date).getTime() >= Date.now() - 7 * DAY);
+  recentMain.week = wk.length >= 10;
   return wk.length >= 10 ? wk : main.slice(0, 30);
 }
+const rouxMain = () => rxSolves.filter(s => !s.lost && s.split && s.split.length);
+function recentRoux(){
+  const all = rouxMain();
+  const wk = all.filter(s => new Date(s.date).getTime() >= Date.now() - 7 * DAY);
+  recentRoux.week = wk.length >= 10;
+  return wk.length >= 10 ? wk : all.slice(0, 30);
+}
+// What is measured for each method. up: bigger is better. def: the target used until there are
+// enough solves for an automatic one. fixed: a target that is a fact, not a number to tune.
+const MEAS = {
+  cfop: [
+    { k: 'solve', name: 'Whole solve (ao12)', unit: 's', def: 46 },
+    { k: 'cross', name: 'Cross (median)', unit: 's', def: 4 },
+    { k: 'crossMv', name: 'Cross moves', unit: '', def: 8 },
+    { k: 'f2l', name: 'F2L (median)', unit: 's', def: 22 },
+    { k: 'look', name: 'Look before each pair', unit: 's', dp: 2, def: 2.0 },
+    { k: 'pause', name: 'Mid-pair pauses per pair', unit: 's', dp: 2, def: 1.2 },
+    { k: 'moves', name: 'Moves per pair', unit: '', def: 9 },
+    { k: 'stuck', name: 'Pairs with a stuck piece', unit: '%', dp: 0, def: 20 },
+    { k: 'missed', name: 'Easier pairs missed per F2L solve', unit: '', dp: 2, def: 0.5 },
+    { k: 'oll', name: 'OLL (median)', unit: 's', def: 5 },
+    { k: 'pll', name: 'PLL (median)', unit: 's', def: 6 },
+    { k: 'tps', name: 'Sexy move speed', unit: 'TPS', dp: 2, up: true, def: 5 },
+    { k: 'pllKnown', name: 'PLLs known', unit: '', dp: 0, up: true, fixed: 21 },
+  ],
+  roux: [
+    { k: 'solve', name: 'Whole solve (median)', unit: 's' },
+    { k: 'fb', name: 'First block (median)', unit: 's' },
+    { k: 'sb', name: 'Second block (median)', unit: 's' },
+    { k: 'cmll', name: 'Corners, CMLL (median)', unit: 's' },
+    { k: 'lse', name: 'Last six edges (median)', unit: 's' },
+    { k: 'moves', name: 'Moves per solve', unit: '' },
+    { k: 'tps', name: 'M\' U M U\' speed', unit: 'TPS', dp: 2, up: true, def: 4 },
+  ],
+};
+// The "Start" column of the progress table: your own numbers from when you began. Editable, and
+// kept with your settings. The CFOP defaults are the app author's first week.
+const START_DEF = { solve: 51.0, cross: 6.0, f2l: 25.5, look: 2.7, pause: 2.2, moves: 10.0, stuck: 30, oll: 6.9, pll: 9.9, pllKnown: 4 };
+function planStart(method){ return method === 'roux' ? Object.assign({}, settings.planStartRoux || {}) : Object.assign({}, START_DEF, settings.planStart || {}); }
+
+// Step figures for a list of CFOP timer solves. wide: average the whole list (for targets)
+// instead of the latest 12.
+function cfopStats(main, wide){
+  const S = {}, sp = (s, n) => (s.split.find(x => x.n === n) || {});
+  { // an average with too many DNFs is not a number: fall back to the median of the finished solves
+    const a = main.length >= 5 ? aoN(main, wide ? main.length : Math.min(12, main.length)) : null, v = (a != null && isFinite(a)) ? a : (main.length >= 5 ? medOf(main.map(effTime)) : null);
+    S.solve = v == null ? null : v / 1000;
+  }
+  S.cross = medOf(main.map(s => sp(s, 'Cross').t / 1000));
+  S.crossMv = meanOf(main.map(s => sp(s, 'Cross').mv));
+  S.f2l = medOf(main.map(s => sp(s, 'F2L').t / 1000));
+  S.oll = medOf(main.map(s => sp(s, 'OLL').t / 1000));
+  S.pll = medOf(main.map(s => sp(s, 'PLL').t / 1000));
+  const pairs = main.flatMap(pairInfo);
+  S.pairs = pairs.length;
+  S.look = meanOf(pairs.map(p => p.look / 1000));
+  S.pause = meanOf(pairs.map(p => p.pause / 1000));
+  S.moves = meanOf(pairs.map(p => p.htm));
+  S.stuck = pairs.length ? 100 * pairs.filter(p => p.stuck).length / pairs.length : null;
+  return S;
+}
+// F2L tab solves at full speed (not the slow-lookahead session, not retries)
+function f2lFullSpeed(){
+  const slowId = (sessList('f2l').find(x => /slow/i.test(x.name)) || {}).id;
+  return histAll.filter(h => h.sum && (h.session || 'main') !== slowId && !h.retryOf);
+}
 function practiceMetrics(){
-  const M = {};
   const main = recentMain();
+  const M = cfopStats(main, false);
   M.nMain = main.length;
-  const sp = (s, n) => (s.split.find(x => x.n === n) || {});
-  M.solve = main.length >= 5 ? (aoN(main, Math.min(12, main.length)) || medOf(main.map(effTime))) / 1000 : null;
-  M.cross = medOf(main.map(s => sp(s, 'Cross').t / 1000));
-  M.crossMv = meanOf(main.map(s => sp(s, 'Cross').mv));
-  M.f2l = medOf(main.map(s => sp(s, 'F2L').t / 1000));
-  M.oll = medOf(main.map(s => sp(s, 'OLL').t / 1000));
-  M.pll = medOf(main.map(s => sp(s, 'PLL').t / 1000));
   { // slowest last-layer look, from the 2-look split
     const by = {}; main.forEach(s => (s.ll || []).forEach(x => (by[x.s] = by[x.s] || []).push(x.look + x.turn)));
     const w = Object.entries(by).filter(([, a]) => a.length >= 3).map(([k, a]) => [k, medOf(a)]).sort((a, b) => b[1] - a[1])[0];
     M.llSlow = w ? LL_STEP_NAMES[w[0]] + ' (' + (w[1] / 1000).toFixed(1) + ' s)' : null;
   }
-  const pairs = main.flatMap(pairInfo);
-  M.pairs = pairs.length;
-  M.look = meanOf(pairs.map(p => p.look / 1000));
-  M.pause = meanOf(pairs.map(p => p.pause / 1000));
-  M.moves = meanOf(pairs.map(p => p.htm));
-  M.stuck = pairs.length ? 100 * pairs.filter(p => p.stuck).length / pairs.length : null;
-  // F2L tab, full speed (not the slow-lookahead session)
-  const slowId = (sessList('f2l').find(x => /slow/i.test(x.name)) || {}).id;
-  const f2 = histAll.filter(h => h.sum && (h.session || 'main') !== slowId && !h.retryOf).slice(0, 30);
+  const f2 = f2lFullSpeed().slice(0, 30);
   M.missed = f2.length >= 3 ? meanOf(f2.map(h => h.sum.missed)) : null;
   // F2L cards
   const fc = LLCARDS.filter(c => c.set === 'F2L').map(c => f2lSeenStats(c)).filter(x => x && x.n >= 2 && x.extra != null);
@@ -4656,36 +4846,92 @@ function practiceMetrics(){
   M.lastLearn = Math.max(0, ...LLCARDS.flatMap(c => stat(c.id).hist.filter(h => h.learn || h.test).map(h => h.d)));
   // finger tricks
   const sx = drillLog["R U R' U'"] || [];
-  M.sexyTps = sx.length ? meanOf(sx.slice(-5).map(x => x.tps)) : null;
+  M.tps = M.sexyTps = sx.length ? meanOf(sx.slice(-5).map(x => x.tps)) : null;
   M.lastDrill = Math.max(0, ...Object.values(drillLog).flatMap(L => L.map(x => x.d)));
   M.lastMain = main.length ? Math.max(...main.map(s => new Date(s.date).getTime())) : 0;
   return M;
 }
+function rouxStats(list){
+  const sp = (s, n) => ((s.split || []).find(x => x.n === n) || {});
+  return { solve: medOf(list.map(s => s.time / 1000)), fb: medOf(list.map(s => sp(s, 'FB').t / 1000)), sb: medOf(list.map(s => sp(s, 'SB').t / 1000)),
+    cmll: medOf(list.map(s => sp(s, 'CMLL').t / 1000)), lse: medOf(list.map(s => sp(s, 'LSE').t / 1000)), moves: meanOf(list.map(s => s.stm)) };
+}
+function rouxMetrics(){
+  const main = recentRoux();
+  const M = rouxStats(main);
+  M.nMain = main.length;
+  const mx = drillLog["M' U M U'"] || [];
+  M.tps = mx.length ? meanOf(mx.slice(-5).map(x => x.tps)) : null;
+  M.lastMain = main.length ? Math.max(...main.map(s => new Date(s.date).getTime())) : 0;
+  M.lastSlow = rxSlow.length ? Math.max(...rxSlow.slice(0, 5).map(s => new Date(s.date).getTime() || 0)) : 0;
+  return M;
+}
+// Targets. Automatic: 10% better than your own figure over your latest 50 solves, so the target
+// moves as you improve. One you typed yourself wins; with fewer than 10 solves the fixed default is used.
+const TARGET_WINDOW = 50, TARGET_GAIN = 0.10, TARGET_MIN = 10;
+function autoTargets(method){
+  const out = {}, better = (v, up) => v == null || !isFinite(v) ? null : v * (up ? 1 + TARGET_GAIN : 1 - TARGET_GAIN);
+  if (method === 'roux') {
+    const list = rouxMain().slice(0, TARGET_WINDOW);
+    if (list.length >= TARGET_MIN) { const S = rouxStats(list); for (const k of ['solve', 'fb', 'sb', 'cmll', 'lse', 'moves']) out[k] = better(S[k]); }
+    const mx = drillLog["M' U M U'"] || []; if (mx.length >= 5) out.tps = better(meanOf(mx.slice(-TARGET_WINDOW).map(x => x.tps)), true);
+  } else {
+    const list = mainSolves().slice(0, TARGET_WINDOW);
+    if (list.length >= TARGET_MIN) { const S = cfopStats(list, true); for (const k of ['solve', 'cross', 'crossMv', 'f2l', 'look', 'pause', 'moves', 'stuck', 'oll', 'pll']) out[k] = better(S[k]); }
+    const f2 = f2lFullSpeed().slice(0, TARGET_WINDOW); if (f2.length >= TARGET_MIN) out.missed = better(meanOf(f2.map(h => h.sum.missed)));
+    const sx = drillLog["R U R' U'"] || []; if (sx.length >= 5) out.tps = better(meanOf(sx.slice(-TARGET_WINDOW).map(x => x.tps)), true);
+  }
+  for (const k in out) if (out[k] == null) delete out[k];
+  return out;
+}
+function planTargets(method){
+  const user = (settings.planTargets || {})[method] || {}, auto = autoTargets(method), T = {};
+  for (const m of MEAS[method]) {
+    const u = user[m.k];
+    T[m.k] = m.fixed != null ? { v: m.fixed, src: 'fixed' } : (u != null && isFinite(u)) ? { v: +u, src: 'yours' } : auto[m.k] != null ? { v: auto[m.k], src: 'auto' } : m.def != null ? { v: m.def, src: 'default' } : { v: null, src: 'none' };
+    T[m.k].auto = auto[m.k] != null ? auto[m.k] : null;
+  }
+  return T;
+}
+const measNum = (m, v) => v == null || !isFinite(v) ? '—' : (+v).toFixed(m.dp == null ? 1 : m.dp) + (m.unit === '%' ? '%' : m.unit ? ' ' + m.unit : '');
+function targetText(m, t){
+  if (!t || t.v == null) return 'set after ' + TARGET_MIN + ' solves';
+  if (m.k === 'pllKnown') return 'all 21';
+  return measNum(m, t.v) + (m.up ? ' or more' : ' or less');
+}
+const targetMet = (m, t, now) => t && t.v != null && now != null && (m.up ? now >= t.v - 1e-9 : now <= t.v + 1e-9);
 // How much each area needs work: about 1 is on target, 2 is far off. Each comes with the reason.
-function areaScores(M){
+// A step's need is weighted by how much of your solve it takes: more time there, more to gain.
+function areaScores(M, T){
   const f1 = (v, d) => v == null ? '—' : v.toFixed(d == null ? 1 : d);
   const A = {};
   const put = (k, score, now, target, why) => { A[k] = { score: Math.max(0.2, Math.min(2.5, score)), now, target, why }; };
+  const meas = (k) => MEAS.cfop.find(m => m.k === k), tx = (k) => measNum(meas(k), T[k].v);
+  const rat = (now, k) => { const t = T[k].v; if (now == null || t == null) return null; if (meas(k).up) return t / Math.max(now, 1e-6); return t > 0 ? now / t : (now > 0 ? 2 : 1); };
+  const share = (v) => v != null && M.solve ? Math.max(0, Math.min(1, v / M.solve)) : null, wt = (s) => s == null ? 1 : 0.8 + 0.8 * s;
   { // lookahead
-    const a = M.look != null ? M.look / 2.0 : null, b = M.pause != null ? M.pause / 1.2 : null;
-    put('lookahead', a == null ? 1.2 : Math.max(a, b || 0), M.look == null ? '—' : f1(M.look, 2) + ' s look, ' + f1(M.pause, 2) + ' s pauses per pair', 'under 2.0 s and 1.2 s',
+    const a = rat(M.look, 'look'), b = rat(M.pause, 'pause');
+    put('lookahead', (a == null ? 1.2 : Math.max(a, b || 0)) * wt(share(M.f2l)), M.look == null ? '—' : f1(M.look, 2) + ' s look, ' + f1(M.pause, 2) + ' s pauses per pair', tx('look') + ' look, ' + tx('pause') + ' pauses',
       M.look == null ? 'No analysed timer solves yet.' : 'You look ' + f1(M.look, 2) + ' s before each pair and stop ' + f1(M.pause, 2) + ' s inside it.');
   }
   { // pair choice and efficiency
-    const parts = [M.missed != null ? M.missed / 0.5 : null, M.stuck != null ? M.stuck / 20 : null, M.moves != null ? M.moves / 9 : null].filter(x => x != null);
-    put('pairs', parts.length ? Math.max(...parts) : 1, M.moves == null ? '—' : f1(M.moves) + ' moves/pair, ' + Math.round(M.stuck) + '% stuck' + (M.missed != null ? ', ' + f1(M.missed) + ' easier pairs missed/solve' : ''), '9 moves, under 20%, under 0.5',
+    const parts = [rat(M.missed, 'missed'), rat(M.stuck, 'stuck'), rat(M.moves, 'moves')].filter(x => x != null);
+    put('pairs', (parts.length ? Math.max(...parts) : 1) * wt(share(M.f2l)), M.moves == null ? '—' : f1(M.moves) + ' moves/pair, ' + Math.round(M.stuck) + '% stuck' + (M.missed != null ? ', ' + f1(M.missed) + ' easier pairs missed/solve' : ''), tx('moves') + ' moves, ' + tx('stuck') + ' stuck, ' + tx('missed') + ' missed',
       M.moves == null ? 'No analysed solves yet.' : f1(M.moves) + ' moves per pair, ' + Math.round(M.stuck) + '% of pairs with a stuck piece' + (M.missed != null ? ', ' + f1(M.missed) + ' easier pairs missed per F2L solve' : '') + '.');
   }
   put('f2lcases', M.f2lSeen ? 0.7 + 0.15 * M.weakF2L : 0.7, M.f2lSeen ? M.weakF2L + ' of ' + M.f2lSeen + ' cases over +1.5 moves' : '—', 'none over +1.5',
     M.f2lSeen ? M.weakF2L + ' F2L cases cost you over 1.5 extra moves each.' : 'Not enough F2L cases recorded yet.');
   {
-    const parts = [M.cross != null ? M.cross / 4 : null, M.crossMv != null ? M.crossMv / 8 : null, M.crossClean != null ? 0.5 + (1 - M.crossClean) * 1.5 : null].filter(x => x != null);
-    put('cross', parts.length ? Math.max(...parts) : 1.2, M.cross == null ? '—' : f1(M.cross) + ' s, ' + f1(M.crossMv) + ' moves' + (M.crossClean != null ? ', ' + Math.round(M.crossClean * 100) + '% clean in drills' : ''), 'under 4 s, 8 moves',
+    const parts = [rat(M.cross, 'cross'), rat(M.crossMv, 'crossMv')].filter(x => x != null).map(x => x * wt(share(M.cross)));
+    if (M.crossClean != null) parts.push(0.5 + (1 - M.crossClean) * 1.5);
+    put('cross', parts.length ? Math.max(...parts) : 1.2, M.cross == null ? '—' : f1(M.cross) + ' s, ' + f1(M.crossMv) + ' moves' + (M.crossClean != null ? ', ' + Math.round(M.crossClean * 100) + '% clean in drills' : ''), tx('cross') + ', ' + tx('crossMv') + ' moves',
       M.cross == null ? 'No timer solves yet.' : 'Your cross takes ' + f1(M.cross) + ' s and ' + f1(M.crossMv) + ' moves' + (M.crossClean != null ? '; ' + Math.round(M.crossClean * 100) + '% of drill crosses were optimal with no pause' : '') + '.');
   }
   {
-    const parts = [M.oll != null ? M.oll / 5 : null, M.pll != null ? M.pll / 6 : null, M.llKnown ? 0.8 + 0.1 * M.llWeak.length : null].filter(x => x != null);
-    put('ll', parts.length ? Math.max(...parts) : 0.8, M.oll == null ? M.llWeak.length + ' weak cards' : 'OLL ' + f1(M.oll) + ' s, PLL ' + f1(M.pll) + ' s', 'OLL 5 s, PLL 6 s',
+    const llShare = M.oll != null && M.pll != null ? share(M.oll + M.pll) : null;
+    const parts = [rat(M.oll, 'oll'), rat(M.pll, 'pll')].filter(x => x != null).map(x => x * wt(llShare));
+    if (M.llKnown) parts.push(0.8 + 0.1 * M.llWeak.length);
+    put('ll', parts.length ? Math.max(...parts) : 0.8, M.oll == null ? M.llWeak.length + ' weak cards' : 'OLL ' + f1(M.oll) + ' s, PLL ' + f1(M.pll) + ' s', 'OLL ' + tx('oll') + ', PLL ' + tx('pll'),
       (M.oll != null ? 'OLL takes ' + f1(M.oll) + ' s and PLL ' + f1(M.pll) + ' s in your solves' + (M.llSlow ? '; slowest look: ' + M.llSlow : '') + '. ' : '') + (M.llWeak.length ? 'Weakest cards: ' + M.llWeak.slice(0, 3).join(', ') + '.' : ''));
   }
   {
@@ -4694,10 +4940,37 @@ function areaScores(M){
     put('learn', s, M.pllKnown + ' of 21 PLLs known', 'all 21',
       !M.poolLeft ? 'Nothing left in your New card pool.' : fresh ? 'You learned one in the last day; let it settle first.' : M.llWeak.length > 4 ? 'Shore up your weak cards before adding more.' : M.poolLeft + ' cards left in your pool.');
   }
-  put('tricks', M.sexyTps != null ? 5 / Math.max(M.sexyTps, 1) : 1, M.sexyTps != null ? f1(M.sexyTps, 2) + ' TPS on the sexy move' : '—', '5 TPS',
-    M.sexyTps != null ? 'Sexy move at ' + f1(M.sexyTps, 2) + ' turns per second.' : 'No drills yet.');
+  { const r = rat(M.sexyTps, 'tps');
+    put('tricks', r == null ? 1 : r, M.sexyTps != null ? f1(M.sexyTps, 2) + ' TPS on the sexy move' : '—', tx('tps'),
+      M.sexyTps != null ? 'Sexy move at ' + f1(M.sexyTps, 2) + ' turns per second.' : 'No drills yet.'); }
   const stale = Date.now() - M.lastMain > 20 * 3600e3;
-  put('solves', stale ? 1.4 : 0.9, M.solve != null ? f1(M.solve) + ' s (' + M.nMain + ' solves)' : '—', 'under 46 s',
+  put('solves', stale ? 1.4 : 0.9, M.solve != null ? f1(M.solve) + ' s (' + M.nMain + ' solves)' : '—', tx('solve'),
+    stale ? 'No timed solves in the last day: a few keep the numbers honest.' : 'Some full solves to see if the drills carry over.');
+  return A;
+}
+function rouxAreas(M, T){
+  const f1 = (v, d) => v == null ? '—' : v.toFixed(d == null ? 1 : d);
+  const A = {};
+  const put = (k, score, now, target, why) => { A[k] = { score: Math.max(0.2, Math.min(2.5, score)), now, target, why }; };
+  const meas = (k) => MEAS.roux.find(m => m.k === k), tx = (k) => T[k].v == null ? 'set after ' + TARGET_MIN + ' solves' : measNum(meas(k), T[k].v);
+  const rat = (now, k) => { const t = T[k].v; if (now == null || t == null) return null; if (meas(k).up) return t / Math.max(now, 1e-6); return t > 0 ? now / t : 1; };
+  const wt = (v) => v != null && M.solve ? 0.8 + 0.8 * Math.max(0, Math.min(1, v / M.solve)) : 1;
+  // with no solves yet, the order a new Roux solver should work in: first block, M turns, second block
+  const step = (area, k, name, none, tip) => { const r = rat(M[k], k);
+    put(area, r == null ? none : r * wt(M[k]), M[k] == null ? '—' : f1(M[k]) + ' s' + (M.solve ? ' · ' + Math.round(100 * M[k] / M.solve) + '% of the solve' : ''), tx(k),
+      M[k] == null ? 'No timed Roux solves with splits yet. ' + tip : name + ' takes ' + f1(M[k]) + ' s' + (M.solve ? ', ' + Math.round(100 * M[k] / M.solve) + '% of your solve' : '') + '.'); };
+  step('rfb', 'fb', 'Your first block', 1.3, 'First block planning matters most at the start.');
+  step('rsb', 'sb', 'Your second block', 1.1, 'Second block is the longest step for most solvers.');
+  step('rcmll', 'cmll', 'CMLL', 1.0, 'Use 2-look corners until they are automatic.');
+  step('rlse', 'lse', 'Your last six edges', 1.0, 'Even M turns make this step.');
+  { const r = rat(M.moves, 'moves'), stale = Date.now() - M.lastSlow > 3 * DAY;
+    put('rmoves', r == null ? (stale ? 1.0 : 0.6) : r * (stale ? 1 : 0.7), M.moves == null ? '—' : f1(M.moves) + ' moves per solve', tx('moves'),
+      (M.moves == null ? 'No timed solves yet. ' : 'You use ' + f1(M.moves) + ' moves per solve. ') + (stale ? 'No slow solve in the last three days.' : 'You did slow solves recently.')); }
+  { const r = rat(M.tps, 'tps');
+    put('rtricks', r == null ? 1.2 : r, M.tps != null ? f1(M.tps, 2) + ' TPS on M\' U M U\'' : '—', tx('tps'),
+      M.tps != null ? 'M\' U M U\' at ' + f1(M.tps, 2) + ' turns per second.' : 'No M-turn drills yet; smooth M turns carry the last two steps.'); }
+  const stale = Date.now() - M.lastMain > 20 * 3600e3;
+  put('rsolves', stale ? 1.4 : 0.9, M.solve != null ? f1(M.solve) + ' s (' + M.nMain + ' solves)' : '—', tx('solve'),
     stale ? 'No timed solves in the last day: a few keep the numbers honest.' : 'Some full solves to see if the drills carry over.');
   return A;
 }
@@ -4712,15 +4985,16 @@ function recentLoad(){
 }
 function rng(seed){ let x = (seed * 2654435761) >>> 0 || 1; return () => { x ^= x << 13; x >>>= 0; x ^= x >> 17; x ^= x << 5; x >>>= 0; return x / 4294967296; }; }
 function buildSession(mins, seed){
-  const M = practiceMetrics(), A = areaScores(M), load = recentLoad(), r = rng(seed);
-  const cand = Object.keys(EX).filter(k => k !== 'warm' && k !== 'rest').map(k => {
+  const method = curMethod(), roux = method === 'roux';
+  const M = roux ? rouxMetrics() : practiceMetrics(), T = planTargets(method), A = roux ? rouxAreas(M, T) : areaScores(M, T), load = recentLoad(), r = rng(seed);
+  const cand = Object.keys(EX).filter(k => EX[k].m === method && AREA_OF[k]).map(k => {
     const a = A[AREA_OF[k]];
     const eff = a.score / (1 + (load[AREA_OF[k]] || 0) / 20) * (0.8 + 0.4 * r());
     return { ex: k, eff, a };
   }).filter(c => c.a.score > 0.25).sort((x, y) => y.eff - x.eff);
   const steps = [];
   let left = mins;
-  if (mins >= 20) { steps.push({ ex: 'warm', min: 3, why: 'Hands first, then the work.' }); left -= 3; }
+  if (mins >= 20) { steps.push({ ex: roux ? 'rwarm' : 'warm', min: 3, why: 'Hands first, then the work.' }); left -= 3; }
   // under an hour: one focus, done properly; an hour or more: a few longer blocks
   const n = mins < 60 ? 1 : Math.max(2, Math.min(4, Math.round(left / 15)));
   const maxB = mins < 60 ? left : Math.max(20, Math.ceil(left / n));
@@ -4738,13 +5012,13 @@ function buildSession(mins, seed){
   if (diff) alloc[0] += diff;
   pick.forEach((c, i) => steps.push({ ex: c.ex, min: alloc[i], why: c.a.why }));
   steps.sort((x, y) => EX_ORDER.indexOf(x.ex) - EX_ORDER.indexOf(y.ex));
-  return { mins, steps: withBreaks(steps), areas: A };
+  return { mins, steps: withBreaks(steps), areas: A, method, M, T };
 }
 // Breaks: a long single focus is cut into rounds of about 12 minutes with 2-minute breaks;
 // separate blocks in a long session get a 3-minute break between them. Breaks come out of the total.
 function withBreaks(steps){
-  const out = [], work = steps.filter(s => s.ex !== 'warm');
-  for (const s of steps) if (s.ex === 'warm') out.push(s);
+  const out = [], work = steps.filter(s => !isWarm(s));
+  for (const s of steps) if (isWarm(s)) out.push(s);
   work.forEach((s, bi) => {
     if (bi > 0) { out.push({ ex: 'rest', min: 3, why: 'Between blocks.' }); s.min -= 3; }
     const k = s.min > 22 ? Math.ceil(s.min / 14) : 1;
@@ -4762,42 +5036,47 @@ function stepDef(s){ return Object.assign({}, EX[s.ex], s); }
 let planDraft = null;
 function renderPlan(){
   const P = planState();
-  if (!planDraft || planDraft.mins !== P.mins || planDraft.seed !== P.seed) { planDraft = buildSession(P.mins, P.seed); planDraft.seed = P.seed; }
+  planDraft = buildSession(P.mins, P.seed); planDraft.seed = P.seed; // rebuilt every time, so it always reflects your latest solves
+  const method = planDraft.method, roux = method === 'roux';
   const r = runState();
-  let h = '<p class="eyebrow" style="margin:0">Practice</p><h2 class="plan-h">How long have you got?</h2>' +
+  let h = '<p class="eyebrow" style="margin:0">Practice · ' + (roux ? 'Roux' : 'CFOP') + '</p><h2 class="plan-h">How long have you got?</h2>' +
     '<div class="row" style="gap:6px">' + [10, 15, 20, 30, 45, 60, 90].map(m => '<button class="mini' + (m === P.mins ? ' primary' : '') + '" data-pmins="' + m + '">' + m + ' min</button>').join('') + '</div>' +
     '<p class="hint">Under an hour, the session sticks to one exercise: the one you need most that you have not done lately. An hour or more is split into a few blocks. The next session rotates.</p>';
   h += '<ol class="plan-blocks" style="margin-top:10px">' + planDraft.steps.map(s => { const d = stepDef(s); if (s.ex === 'rest') return '<li class="hint">Break · ' + d.min + ' min</li>'; return '<li><b>' + esc(d.name) + '</b>' + (s.round ? ' <span class="hint">round ' + s.round + '</span>' : '') + ' <span class="hint">' + d.min + ' min</span>' + (s.round && !s.round.startsWith('1 ') ? '' : '<br><span>' + esc(d.what) + '</span><br><span class="hint">Why: ' + esc(d.why) + '</span>') + '</li>'; }).join('') + '</ol>';
   h += '<div class="row" style="margin-top:10px">' + (r ? '<span class="pill good">a session is running: see the bar at the bottom</span>' : '<button class="primary" id="pStart">Start</button><button id="pReroll">Another mix</button>') + '</div>';
   $('planTop').innerHTML = h;
   // where you need work
-  const A = planDraft.areas;
-  const names = { lookahead: 'Lookahead (F2L)', pairs: 'Pair choice and efficiency', f2lcases: 'F2L cases', cross: 'Cross', ll: 'OLL & PLL speed', learn: 'Learning new algs', tricks: 'Finger tricks', solves: 'Full solves' };
+  const A = planDraft.areas, M = planDraft.M, T = planDraft.T;
+  const names = roux ? { rfb: 'First block', rsb: 'Second block', rcmll: 'Corners (CMLL)', rlse: 'Last six edges', rmoves: 'Efficiency (move count)', rtricks: 'M-turn finger tricks', rsolves: 'Full solves' }
+    : { lookahead: 'Lookahead (F2L)', pairs: 'Pair choice and efficiency', f2lcases: 'F2L cases', cross: 'Cross', ll: 'OLL & PLL speed', learn: 'Learning new algs', tricks: 'Finger tricks', solves: 'Full solves' };
   const load = recentLoad();
   const rows = Object.keys(names).map(k => ({ k, a: A[k] })).sort((x, y) => y.a.score - x.a.score);
   $('planDaily').innerHTML = '<p class="eyebrow">Where you need work</p><div class="tablewrap"><table class="plan-t"><thead><tr><th>Area</th><th>Now</th><th>Need</th></tr></thead><tbody>' +
     rows.map(({ k, a }) => '<tr><td style="font-family:var(--sans)">' + names[k] + (load[k] >= 1 ? '<br><span class="hint">' + Math.round(load[k]) + ' min lately</span>' : '') + '</td><td style="font-family:var(--sans);white-space:normal">' + esc(a.now) + '<br><span class="hint">target: ' + esc(a.target) + '</span></td><td><div style="width:64px;height:8px;border-radius:4px;background:var(--line);overflow:hidden"><div style="height:100%;width:' + Math.round(100 * Math.min(a.score, 2) / 2) + '%;background:' + (a.score > 1.3 ? 'var(--bad)' : a.score > 1 ? 'var(--warn)' : 'var(--good)') + '"></div></div></td></tr>').join('') +
-    '</tbody></table></div><p class="hint">Need compares your numbers with the target. The session picks the areas with the most need, discounted by how much you practised them in the last couple of days, with a little randomness so it rotates.</p>';
+    '</tbody></table></div><p class="hint">Need compares your numbers with the target, and counts a step for more the bigger its share of your solve. The session picks the areas with the most need, discounted by how much you practised them in the last couple of days, with a little randomness so it rotates.</p>';
   // recent sessions
   const recent = practiceLog.slice(-8).reverse();
   $('planSetup').innerHTML = '<p class="eyebrow" style="margin-top:14px">Recent sessions</p>' + (recent.length ? '<div class="tablewrap"><table class="plan-t"><thead><tr><th>When</th><th>Minutes</th><th>What</th></tr></thead><tbody>' +
-    recent.map(p => '<tr><td>' + new Date(p.d).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }) + '</td><td>' + Math.round(p.steps.reduce((a, s) => a + (s.used || 0), 0)) + '</td><td style="font-family:var(--sans);white-space:normal">' + [...new Set(p.steps.filter(s => s.used >= 0.5 && s.ex !== 'rest').map(s => s.ex))].map(s => ({ ex: s })).map(s => esc(EX[s.ex].name)).join(', ') + '</td></tr>').join('') + '</tbody></table></div>' : '<p class="hint">None yet.</p>');
-  // progress vs baseline
-  const M = practiceMetrics(), B = PLAN.baseline;
-  const prow = (k, base, now, f, target, ok) => '<tr><td style="font-family:var(--sans)">' + k + '</td><td>' + base + '</td><td><b>' + (now == null ? '—' : f(now)) + '</b></td><td style="font-family:var(--sans)">' + target + '</td><td>' + (now == null ? '<span class="pill">no data yet</span>' : ok(now) ? '<span class="pill good">on target</span>' : '<span class="pill warn">not yet</span>') + '</td></tr>';
-  const s1 = (v) => v.toFixed(1) + ' s', s2 = (v) => v.toFixed(2) + ' s';
-  $('planDays').innerHTML = '<p class="eyebrow">Progress</p><p class="hint" style="margin-top:0">Main timer solves from the last 7 days (' + M.nMain + ' solves, ' + M.pairs + ' pairs), against where you started.</p><div class="tablewrap"><table class="plan-t"><thead><tr><th>Measure</th><th>Start</th><th>Now</th><th>Target</th><th></th></tr></thead><tbody>' +
-    prow('Whole solve (ao12)', '51.0 s', M.solve, s1, 'under 46 s', v => v < 46) +
-    prow('Cross (median)', '6.0 s', M.cross, s1, 'under 4 s', v => v < 4) +
-    prow('F2L (median)', '25.5 s', M.f2l, s1, 'under 22 s', v => v < 22) +
-    prow('Look before each pair', '2.7 s', M.look, s2, 'under 2.0 s', v => v < 2) +
-    prow('Mid-pair pauses per pair', '2.2 s', M.pause, s2, 'under 1.2 s', v => v < 1.2) +
-    prow('Moves per pair', '10.0', M.moves, v => v.toFixed(1), '9 or fewer', v => v <= 9) +
-    prow('Pairs with a stuck piece', '30%', M.stuck, v => Math.round(v) + '%', 'under 20%', v => v < 20) +
-    prow('OLL (median)', '6.9 s', M.oll, s1, 'under 5 s', v => v < 5) +
-    prow('PLL (median)', '9.9 s', M.pll, s1, 'under 6 s', v => v < 6) +
-    prow('PLLs known', '4', M.pllKnown, v => v + ' of 21', 'all 21', v => v >= 21) +
-    '</tbody></table></div>' + stopsByDayHtml();
+    recent.map(p => '<tr><td>' + new Date(p.d).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + '</td><td>' + Math.round(p.steps.reduce((a, s) => a + (s.used || 0), 0)) + '</td><td style="font-family:var(--sans);white-space:normal">' + [...new Set(p.steps.filter(s => s.used >= 0.5 && s.ex !== 'rest' && EX[s.ex]).map(s => s.ex))].map(x => esc(EX[x].name)).join(', ') + '</td></tr>').join('') + '</tbody></table></div>' : '<p class="hint">None yet.</p>');
+  // progress: where you started, where you are, and the target
+  const B = planStart(method), userT = (settings.planTargets || {})[method] || {};
+  const srcNote = { auto: 'auto', yours: 'yours', default: 'starting target', fixed: '', none: '' };
+  const week = roux ? recentRoux.week : recentMain.week;
+  $('planDays').innerHTML = '<p class="eyebrow">Progress</p><p class="hint" style="margin-top:0">' + (roux ? 'Timed Roux solves' : 'Main timer solves') + ' from ' + (week ? 'the last 7 days' : 'your latest 30 (fewer than 10 in the last 7 days)') + ' (' + M.nMain + ' solves' + (roux ? '' : ', ' + M.pairs + ' pairs') + '), against where you started.</p>' +
+    '<div class="tablewrap"><table class="plan-t"><thead><tr><th>Measure</th><th>Start</th><th>Now</th><th>Target</th><th></th></tr></thead><tbody>' +
+    MEAS[method].map(m => { const t = T[m.k], now = M[m.k];
+      return '<tr><td style="font-family:var(--sans)">' + esc(m.name) + '</td><td>' + (m.k === 'pllKnown' && B[m.k] != null ? Math.round(B[m.k]) : measNum(m, B[m.k])) + '</td><td><b>' + (now == null ? '—' : m.k === 'pllKnown' ? now + ' of 21' : measNum(m, now)) + '</b></td>' +
+        '<td style="font-family:var(--sans)">' + esc(targetText(m, t)) + (srcNote[t.src] ? ' <span class="hint">' + srcNote[t.src] + '</span>' : '') + '</td>' +
+        '<td>' + (now == null ? '<span class="pill">no data yet</span>' : t.v == null ? '' : targetMet(m, t, now) ? '<span class="pill good">on target</span>' : '<span class="pill warn">not yet</span>') + '</td></tr>'; }).join('') +
+    '</tbody></table></div>' +
+    '<p class="hint" style="margin-top:8px">An <b>auto</b> target is ' + Math.round(TARGET_GAIN * 100) + '% better than your own figure over your latest ' + TARGET_WINDOW + ' solves, so it moves as you improve. Until you have ' + TARGET_MIN + ' solves a fixed starting target is used. Type your own below to pin one.</p>' +
+    '<details id="startBox" style="margin-top:6px"><summary>Edit start values and targets</summary><p class="hint" style="margin:0 0 8px">Start is the number you began with. Leave a target empty to keep it automatic.</p>' +
+    '<div class="settings" style="grid-template-columns:auto minmax(0,8em) minmax(0,8em)"><span></span><span class="hint">Start</span><span class="hint">Target</span>' +
+    MEAS[method].map(m => '<label for="st-' + m.k + '">' + esc(m.name) + (m.unit ? ' (' + m.unit + ')' : '') + '</label>' +
+      '<input type="text" inputmode="decimal" id="st-' + m.k + '" data-start="' + m.k + '" aria-label="' + esc(m.name) + ', start" value="' + (B[m.k] == null ? '' : esc(String(B[m.k]))) + '" style="flex:none;width:100%">' +
+      (m.fixed != null ? '<span class="hint">' + esc(targetText(m, T[m.k])) + '</span>' : '<input type="text" inputmode="decimal" data-target="' + m.k + '" aria-label="' + esc(m.name) + ', target" value="' + (userT[m.k] == null ? '' : esc(String(userT[m.k]))) + '" placeholder="' + (T[m.k].auto != null ? 'auto ' + (+T[m.k].auto).toFixed(m.dp == null ? 1 : m.dp) : m.def != null ? 'auto (' + m.def + ' for now)' : 'auto') + '" style="flex:none;width:100%">')).join('') + '</div>' +
+    '<div class="row" style="margin-top:8px"><button class="primary" data-startact="save">Save</button><button data-startact="now">Set Start to my numbers now</button><button data-startact="reset">Reset both</button></div></details>' +
+    (roux ? '' : stopsByDayHtml());
 }
 
 // ---------- running a session: what to do now, with a countdown ----------
@@ -4823,19 +5102,27 @@ function stepElapsed(r){ return (r.pausedAt || Date.now()) - r.stepStart - (r.pa
 function startPractice(){
   if (!audioCtx) try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
   const steps = planDraft.steps.map(s => ({ ex: s.ex, min: s.min, why: s.why, round: s.round || null }));
-  saveRun({ steps, step: 0, stepStart: Date.now(), pausedAt: null, pausedTotal: 0, alerted: false, sitStart: Date.now(), used: [] });
+  const prev = { f2lSort: settings.f2lSort || null, timer: curSess('timer'), f2l: curSess('f2l') };
+  saveRun({ prev, steps, step: 0, stepStart: Date.now(), pausedAt: null, pausedTotal: 0, alerted: false, sitStart: Date.now(), used: [] });
   enterStep();
 }
 function enterStep(){
   const r = runState(); if (!r) return;
   const st = curStep(r);
-  if (st.tab && st.tab !== 'plan') setTab(st.tab);
+  gotoStep(st);
+  if (st.trig) { dr.alg = st.trig; drillArm(); }
   if (st.sess) ensureSessionByName(st.sess[0], st.sess[1]);
   if (st.act === 'f2lc') { settings.f2lSort = 'worst'; store.set('settings', settings); renderDeck(); }
   if (st.act === 'new') newCard();
   if (st.act === 'review') nextCard();
   renderRunBar(); if (activeTab === 'plan') renderPlan();
 }
+// Open the place where a step happens (a tab, a Roux drill, the Roux timer in the right mode).
+function gotoStep(st){
+  if (st.slow != null && !!settings.rxSlow !== st.slow) { settings.rxSlow = st.slow; store.set('settings', settings); }
+  if (st.sub) goSub(st.sub); else if (st.tab && st.tab !== 'plan') setTab(st.tab);
+}
+function onStep(st){ return st.sub ? DRILL_TABS.includes(activeTab) && curSub() === st.sub : !st.tab || activeTab === st.tab; }
 function logStepUse(r){ r.used = r.used || []; r.used[r.step] = Math.round(stepElapsed(r) / 6000) / 10; }
 function nextStep(){
   const r = runState(); if (!r) return;
@@ -4847,6 +5134,11 @@ function endRun(r, done){
   practiceLog.push({ d: r.sitStart, steps: r.steps.map((s, i) => ({ ex: s.ex, min: s.min, used: (r.used || [])[i] || 0 })), done });
   savePracticeLog();
   saveRun(null); planDraft = null;
+  if (r.prev) {
+    if (r.prev.f2lSort) settings.f2lSort = r.prev.f2lSort; else delete settings.f2lSort;
+    for (const kind of ['timer', 'f2l']) if (r.prev[kind] && curSess(kind) !== r.prev[kind] && sessList(kind).some(s => s.id === r.prev[kind])) { settings.curSess[kind] = r.prev[kind]; try { afterSessChange(kind); } catch (e) {} }
+    try { if (isLLTab(activeTab)) renderDeck(); } catch (e) {}
+  }
   const P = planState(); P.seed = (P.seed || 1) + 1; store.set('settings', settings);
 }
 function finishSitting(){
@@ -4863,7 +5155,7 @@ function togglePause(){
 }
 const mmss = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
 let runStopArm = 0;
-function runKey(r, left){ return r.sitStart + ':' + r.step + ':' + (r.pausedAt ? 'p' : 'r') + ':' + (left <= 0 ? 'o' : 'n') + ':' + activeTab + ':' + (runStopArm ? 'a' : ''); }
+function runKey(r, left){ return r.sitStart + ':' + r.step + ':' + (r.pausedAt ? 'p' : 'r') + ':' + (left <= 0 ? 'o' : 'n') + ':' + activeTab + ':' + curSub() + ':' + (runStopArm ? 'a' : ''); }
 // Every second only the clock and progress change; the bar is rebuilt only when its buttons change,
 // so a click is never lost to a re-render.
 function tickRunBar(){
@@ -4896,7 +5188,7 @@ function renderRunBar(){
     '<div class="rb-main"><div class="rb-text"><span class="eyebrow" style="margin:0">Practice · step ' + (r.step + 1) + ' of ' + r.steps.length + (r.steps[r.step + 1] ? ' · next: ' + esc(EX[r.steps[r.step + 1].ex].name) : '') + '</span>' +
     '<b>' + esc(st.name) + (st.round ? ' · round ' + st.round : '') + '</b> <span class="hint">' + esc(st.what) + '</span></div>' +
     '<div class="rb-clock' + (over ? ' over' : '') + '"><span id="rbClock">' + (over ? 'Time’s up' : mmss(left)) + '</span><span class="hint" id="rbLeft">' + (r.pausedAt ? 'paused' : mmss(sitLeft) + ' left in session') + '</span></div>' +
-    '<div class="rb-btns">' + (st.tab && activeTab !== st.tab ? '<button class="mini" data-run="go">Go to ' + TAB_LABEL[st.tab] + '</button>' : '') +
+    '<div class="rb-btns">' + (!onStep(st) ? '<button class="mini" data-run="go">Go to ' + esc(st.sub ? st.name : TAB_LABEL[st.tab]) + '</button>' : '') +
     '<button class="mini" data-run="pause">' + (r.pausedAt ? 'Resume' : 'Pause') + '</button>' +
     '<button class="mini' + (over ? ' primary' : '') + '" data-run="next">' + (r.step + 1 < r.steps.length ? 'Next step' : 'Finish') + '</button>' +
     '<button class="mini" data-run="stop">' + (runStopArm ? 'Click again to stop' : 'Stop') + '</button></div></div>';
@@ -4959,14 +5251,21 @@ function drillTurn(m, f, b, raw){
   if (!dr.rem.length) drillFinish(); else renderTricks();
 }
 function drillFinish(){
-  const times = dr.done.slice(); // when each planned turn was completed
+  let times = dr.done.slice(); // when each planned turn was completed
+  let names = E.parseAlg(Array(dr.reps).fill(dr.alg).join(' ')).moves.map(E.moveName), htm = dr.total;
+  // A slice turn (M, E, S) reaches us as two face turns a few milliseconds apart. Count it as the
+  // one turn it is: otherwise the tiny gap inside it wrecks the rhythm, speed and slow-turn numbers.
+  const one = E.parseAlg(dr.alg);
+  if (one && one.perToken.some(n => n > 1) && times.length === dr.total) {
+    const t2 = [], n2 = []; let k = 0;
+    for (let r = 0; r < dr.reps; r++) one.tokens.forEach((tok, ti) => { const n = one.perToken[ti]; if (!n) return; k += n; t2.push(times[k - 1]); n2.push(tok); });
+    times = t2; names = n2; htm = t2.length; dr.algLen = htm / dr.reps;
+  }
   const gaps = []; for (let i = 1; i < times.length; i++) gaps.push(times[i] - times[i - 1]);
   const total = times[times.length - 1] - times[0];
-  const htm = dr.total;
   const mean = gaps.length ? gaps.reduce((a, x) => a + x, 0) / gaps.length : 0;
   const sd = gaps.length ? Math.sqrt(gaps.reduce((a, x) => a + (x - mean) * (x - mean), 0) / gaps.length) : 0;
   const sorted = gaps.slice().sort((a, b) => a - b), med = sorted.length ? sorted[sorted.length >> 1] : 0;
-  const names = E.parseAlg(Array(dr.reps).fill(dr.alg).join(' ')).moves.map(E.moveName);
   const slow = gaps.map((g, i) => ({ g, i })).filter(x => x.g > Math.max(2 * med, 250)).map(x => ({ g: x.g, i: x.i, move: names[x.i + 1] || '', rep: Math.floor((x.i + 1) / dr.algLen) + 1 }));
   const reps = []; for (let r = 0; r < dr.reps; r++) { const a = times[r * dr.algLen], b2 = times[Math.min((r + 1) * dr.algLen, times.length - 1)]; reps.push(b2 - a); }
   const res = { d: Date.now(), tps: total > 0 ? (htm - 1) / (total / 1000) : 0, cv: mean ? sd / mean : 0, total, gaps, med, slow, reps, wrong: dr.wrong, n: dr.reps, names };
@@ -4982,14 +5281,14 @@ function renderTricks(){
   const box = $('trBox'); if (!box) return;
   const trig = TRIGGERS.find(t => t.alg === dr.alg);
   let h = '<p class="eyebrow">Drill</p><div class="chips" style="gap:6px">' + TRIGGERS.map(t => '<button class="mini' + (t.alg === dr.alg ? ' primary' : '') + '" data-trig="' + esc(t.alg) + '" title="' + esc(t.alg) + '">' + esc(t.name) + '</button>').join('') + '</div>' +
-    '<div class="row" style="margin-top:8px"><input type="text" id="trCustom" placeholder="Or type your own, e.g. R U R\' U R U2 R\'" value="' + (trig ? '' : esc(dr.alg)) + '" spellcheck="false"><button class="mini" id="trUse">Use</button>' +
+    '<div class="row" style="margin-top:8px"><input type="text" id="trCustom" aria-label="Your own alg to drill" placeholder="Or type your own, e.g. R U R\' U R U2 R\'" value="' + (trig ? '' : esc(dr.alg)) + '" spellcheck="false"><button class="mini" id="trUse">Use</button>' +
     '<label for="trReps" class="hint">Times in a row</label><select id="trReps">' + [3, 5, 8, 10].map(n => '<option' + (n === dr.reps ? ' selected' : '') + '>' + n + '</option>').join('') + '</select></div>';
   h += '<p class="llname" style="margin-top:12px">' + esc(dr.alg) + ' <span class="hint">× ' + dr.reps + '</span></p>';
   if (dr.phase === 'ready' || dr.phase === 'running') {
     const doneN = dr.total - dr.rem.filter(x => !x.fix).length;
     const rep = Math.min(dr.reps, Math.floor(doneN / dr.algLen) + 1);
     h += '<div class="timer' + (dr.phase === 'ready' ? ' ready' : '') + '" id="trTime">' + (dr.phase === 'ready' ? '0.00' : fmt(performance.now() - dr.t0)) + '</div>' +
-      '<p class="hint">' + (dr.phase === 'ready' ? 'Hold the cube as you would in a solve and start whenever you like: the timer starts on your first turn.' : 'Repetition ' + rep + ' of ' + dr.reps + '. Keep going without stopping.') + '</p>' +
+      '<p class="hint">' + (dr.phase === 'ready' ? (conn ? 'Hold the cube as you would in a solve and start whenever you like: the timer starts on your first turn.' : 'Connect your cube to drill: Slotwise needs to see your turns. Then start whenever you like; the timer starts on your first turn.') : 'Repetition ' + rep + ' of ' + dr.reps + '. Keep going without stopping.') + '</p>' +
       '<div class="dr-prog"><i style="width:' + (100 * doneN / dr.total).toFixed(1) + '%"></i></div>';
     const fx = dr.rem.filter(x => x.fix);
     if (fx.length) h += '<div class="flag"><strong>Wrong turn.</strong> Undo with <code>' + fx.map(tokText).join(' ') + '</code> and carry on.</div>';
@@ -5019,9 +5318,9 @@ function renderTricksLog(){
     const last5 = L.slice(-5), best = Math.max(...L.map(x => x.tps));
     const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
     const nm = (TRIGGERS.find(t => t.alg === alg) || {}).name || alg;
-    return '<tr data-trlog="' + esc(alg) + '"' + (alg === dr.alg ? ' class="sel"' : '') + '><td style="font-family:var(--sans)">' + esc(nm) + '</td><td>' + L.length + '</td><td>' + best.toFixed(2) + '</td><td>' + avg(last5.map(x => x.tps)).toFixed(2) + '</td><td>' + Math.round(avg(last5.map(x => x.cv)) * 100) + '%</td></tr>';
+    return '<tr data-trlog="' + esc(alg) + '" tabindex="0"' + (alg === dr.alg ? ' class="sel"' : '') + '><td style="font-family:var(--sans)">' + esc(nm) + '</td><td>' + L.length + '</td><td>' + best.toFixed(2) + '</td><td>' + avg(last5.map(x => x.tps)).toFixed(2) + '</td><td>' + Math.round(avg(last5.map(x => x.cv)) * 100) + '%</td><td><button class="mini" data-trclear="' + esc(alg) + '" aria-label="Clear the log of ' + esc(nm) + '">Clear</button></td></tr>';
   });
-  $('trLog').innerHTML = rows.length ? '<table><thead><tr><th>Drill</th><th>Runs</th><th>Best TPS</th><th>Last 5 TPS</th><th>Last 5 rhythm spread</th></tr></thead><tbody>' + rows.join('') + '</tbody></table>' : '<p class="hint">Your drills show up here.</p>';
+  $('trLog').innerHTML = rows.length ? '<table><thead><tr><th>Drill</th><th>Runs</th><th>Best TPS</th><th>Last 5 TPS</th><th>Last 5 rhythm spread</th><th></th></tr></thead><tbody>' + rows.join('') + '</tbody></table>' : '<p class="hint">Your drills show up here.</p>';
 }
 function tricksLoop(){
   const el = $('trTime');
@@ -5282,7 +5581,7 @@ function rxSlowSave(){ if (rxSlow.length > 1000) rxSlow.length = 1000; store.set
 function rxIsSlow(){ return !!settings.rxSlow; }
 const rx = { phase: 'idle', target: null, rem: [], scr: '', start: null, moves: [], t0: 0, inspStart: 0, raf: 0, viewId: rxSolves[0] ? rxSolves[0].id : null, lost: false, cache: null, justDone: false };
 const rd = { kind: settings.rdKind || 'fb', phase: 'idle', target: null, rem: [], start: null, moves: [], t0: 0, raf: 0, last: null };
-const TAB_METHOD = { plan: 'cfop', f2l: 'cfop', ll: 'cfop', f2lc: 'cfop', cmllc: 'roux', cross: 'cfop', timer: 'cfop', roux: 'roux', rxd: 'roux', tricks: 'both', drills: 'both' };
+const TAB_METHOD = { plan: 'both', f2l: 'cfop', ll: 'cfop', f2lc: 'cfop', cmllc: 'roux', cross: 'cfop', timer: 'cfop', roux: 'roux', rxd: 'roux', tricks: 'both', drills: 'both' };
 function curMethod(){ return settings.method === 'roux' ? 'roux' : 'cfop'; }
 function applyMethod(){
   const m = curMethod();
@@ -5309,6 +5608,12 @@ function withLSE(msgEl, then){
   if (ROUX.lseReady()) { then(); return; }
   if (msgEl) msgEl.innerHTML = '<p class="eyebrow">Roux</p><p class="phase-title">Building the last-six-edges solver…</p><p class="hint">This takes a few seconds, once per visit.</p>';
   setTimeout(() => { try { ROUX.lseBuild(); } catch (e) {} then(); }, 40);
+}
+// The second-block table is the biggest one; build it behind a message instead of freezing mid-drill.
+function withSB(msgEl, then){
+  if (ROUX.sbReady()) { then(); return; }
+  if (msgEl) msgEl.innerHTML = '<p class="eyebrow">Roux</p><p class="phase-title">Building the second-block solver…</p><p class="hint">This takes a few seconds, once per visit.</p>';
+  setTimeout(() => { try { ROUX.sbBuild(); } catch (e) {} then(); }, 40);
 }
 function withFB(msgEl, then){
   if (ROUX.fbReady()) { then(); return; }
@@ -5410,7 +5715,7 @@ function slowOpt(rec){
 function slowDetailHtml(){
   const s = rxSlow.find(x => x.id === rx.viewSlow) || rxSlow[0];
   if (!s) return '<p class="hint">Slow solves: take as long as you like and aim for as few moves as possible. After each one you see, step by step, your moves against the shortest from that point.</p>';
-  let h = '<div class="row" style="justify-content:space-between;margin-top:6px"><p class="phase-title" style="margin:0">Slow solve · ' + (s.stm || '?') + ' moves</p><span class="hint">' + fmtT(s.time) + '</span></div><p class="orig">' + esc(s.scramble || '') + '</p>';
+  let h = '<div class="row" style="justify-content:space-between;margin-top:6px"><p class="phase-title" style="margin:0">Slow solve · ' + (s.stm || '?') + ' moves</p><span class="row" style="gap:10px"><span class="hint">' + fmtT(s.time) + '</span><button class="mini" data-rxslowdel="' + s.id + '">Delete</button></span></div><p class="orig">' + esc(s.scramble || '') + '</p>';
   if (s.lost) return h + '<p class="hint">Some turns were missed over Bluetooth, so this one cannot be analysed.</p>';
   if (!s.opt) return h + '<p class="hint">Slotwise could not find the steps in this solve.</p>';
   const ref = s.opt.steps.reduce((a, x) => a + (x.opt != null ? x.opt : x.ref != null ? x.ref : x.mv), 0);
@@ -5497,7 +5802,7 @@ function slowStatsHtml(){
   const per = {}; for (const x of ok.slice(0, 20)) for (const y of ((x.opt || {}).steps || [])) { const b = y.opt != null ? y.opt : y.ref; if (b == null) continue; (per[y.n] = per[y.n] || []).push(y.mv - b); }
   const rows = ['FB', 'SB', 'CMLL', 'LSE'].filter(k => per[k]);
   if (rows.length) h += '<p class="eyebrow" style="margin:10px 0 4px">Extra moves per step (last 20)</p><div class="tablewrap"><table><thead><tr><th>Step</th><th>Average extra</th></tr></thead><tbody>' + rows.map(k => '<tr><td style="font-family:var(--sans)">' + RX_LONG[k] + '</td><td>+' + mean(per[k]) + '</td></tr>').join('') + '</tbody></table></div>';
-  if (ok.length) h += '<p class="eyebrow" style="margin:10px 0 4px">Solves</p><div class="tablewrap"><table><thead><tr><th>#</th><th>Moves</th><th>Shortest (per step)</th><th>Time</th></tr></thead><tbody>' + rxSlow.slice(0, 30).map((x, i) => { const ref = x.opt ? x.opt.steps.reduce((a, y) => a + (y.opt != null ? y.opt : y.ref != null ? y.ref : y.mv), 0) : null; return '<tr data-rxslowid="' + x.id + '"' + (x.id === rx.viewSlow ? ' class="sel"' : '') + '><td>' + (rxSlow.length - i) + '</td><td>' + (x.stm || '—') + '</td><td>' + (ref ?? '—') + '</td><td>' + fmtT(x.time) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+  if (ok.length) h += '<p class="eyebrow" style="margin:10px 0 4px">Solves</p><div class="tablewrap"><table><thead><tr><th>#</th><th>Moves</th><th>Shortest (per step)</th><th>Time</th></tr></thead><tbody>' + rxSlow.slice(0, 30).map((x, i) => { const ref = x.opt ? x.opt.steps.reduce((a, y) => a + (y.opt != null ? y.opt : y.ref != null ? y.ref : y.mv), 0) : null; return '<tr data-rxslowid="' + x.id + '" tabindex="0"' + (x.id === rx.viewSlow ? ' class="sel"' : '') + '><td>' + (rxSlow.length - i) + '</td><td>' + (x.stm || '—') + '</td><td>' + (ref ?? '—') + '</td><td>' + fmtT(x.time) + '</td></tr>'; }).join('') + '</tbody></table></div>';
   h += '<p class="hint" style="margin-top:10px">Good slow-solve habits: plan the whole first block in inspection, build the second block with R, U, M and r only, and look for the shortest EO before turning. Fewer moves usually means less looking later too.</p>';
   return h;
 }
@@ -5567,7 +5872,7 @@ function renderRxStats(){
   }
   h += '<div class="tablewrap" style="max-height:360px;overflow-y:auto;margin-top:8px"><table><thead><tr><th>#</th><th>Time</th><th>FB</th><th>SB</th><th>CMLL</th><th>LSE</th><th>Moves</th></tr></thead><tbody>' +
     (rxSolves.length ? rxSolves.map((s, i) => { const g = (k) => { const x = (s.split || []).find(y => y.n === k); return x ? fmtT(x.t) : ''; };
-      return '<tr data-rxid="' + s.id + '"' + (s.id === rx.viewId ? ' class="sel"' : '') + '><td>' + (rxSolves.length - i) + '</td><td><b>' + fmtT(s.time) + '</b></td><td>' + g('FB') + '</td><td>' + g('SB') + '</td><td>' + g('CMLL') + '</td><td>' + g('LSE') + '</td><td>' + (s.stm ?? '') + '</td></tr>'; }).join('')
+      return '<tr data-rxid="' + s.id + '" tabindex="0"' + (s.id === rx.viewId ? ' class="sel"' : '') + '><td>' + (rxSolves.length - i) + '</td><td><b>' + fmtT(s.time) + '</b></td><td>' + g('FB') + '</td><td>' + g('SB') + '</td><td>' + g('CMLL') + '</td><td>' + g('LSE') + '</td><td>' + (s.stm ?? '') + '</td></tr>'; }).join('')
       : '<tr><td colspan="7" style="font-family:var(--sans);color:var(--muted)">No solves yet.</td></tr>') + '</tbody></table></div>';
   el.innerHTML = h;
 }
@@ -5701,7 +6006,7 @@ function rdNew(){
     rd.target = ROUX.unconj(G, r); rd.attempt = 1; rd.peek = false; if (rd.kind !== 'cmll') rd.card = null; rd.v = rd.kind === 'fb' ? fbVar() : rd.kind === 'sb' ? sbVar() : rd.kind === 'lse' ? lseVar() : undefined;
     rdArm();
   };
-  if (rd.kind === 'fb') withFB($('rdBox'), go); else if (rd.kind === 'lse') withLSE($('rdBox'), go); else go();
+  if (rd.kind === 'fb') withFB($('rdBox'), go); else if (rd.kind === 'lse') withLSE($('rdBox'), go); else if (rd.kind === 'sb') withSB($('rdBox'), go); else go();
 }
 function rdArm(){
   cancelAnimationFrame(rd.raf);
@@ -5754,7 +6059,7 @@ function rdFinish(){
       if (ROUX.fbN(frame) === 0) { const x = ROUX.sbSolutions(frame, rd.v === 'fs' ? 'fs' : 'full', 80, 4); if (x.opt != null) { L.opt = x.opt; L.sols = x.sols; } }
       L.text = ROUX.describe(moves, r, { anchorFrom: 0, fm0: ROUX.fmFor(ROUX.fbN(frame)) }).map(t => t.txt).join(' ');
     } else {
-      const sp = ROUX.split(rd.start, moves, { rot: r });
+      const sp = ROUX.split(rd.start, moves, { rot: r, partialCO: rd.kind === 'cmll' });
       const st = sp.steps.find(x => x.name === (rd.kind === 'cmll' ? 'CMLL' : 'LSE'));
       if (st) { L.steps = st.sub && st.sub.length ? st.sub : [st]; L.text = st.text; L.case = st.case; }
       if (rd.kind === 'lse') {
@@ -5871,7 +6176,7 @@ function renderRdStats(){
   cm.forEach(x => { const c = x.c.split(',')[0].replace(' (one look)', ''); (by[c] = by[c] || []).push(x.t + x.look); });
   const rows = Object.entries(by).map(([c, a]) => [c, a.length, av(a)]).sort((a, b) => b[2] - a[2]);
   if (rows.length) h += '<p class="eyebrow" style="margin:12px 0 4px">Corner cases, slowest first</p><div class="tablewrap"><table><thead><tr><th>Case</th><th>Seen</th><th>Look + turn</th></tr></thead><tbody>' + rows.map(x => '<tr><td style="font-family:var(--sans)">' + esc(x[0]) + '</td><td>' + x[1] + '</td><td>' + fmt(x[2]) + '</td></tr>').join('') + '</tbody></table></div>';
-  h += '<p class="hint" style="margin-top:12px">Where to start at around 1:40: first block planning and smooth M turns matter most. Do first blocks slowly until you can plan one in inspection, drill M turns in Finger tricks, and use 2-look corners until they are automatic. Full CMLL can wait.</p>';
+  h += '<p class="hint" style="margin-top:12px">Where to start if you are new to Roux (solves around 1:40): first block planning and smooth M turns matter most. Do first blocks slowly until you can plan one in inspection, drill M turns in Finger tricks, and use 2-look corners until they are automatic. Full CMLL can wait.</p>';
   el.innerHTML = h;
 }
 
@@ -5881,12 +6186,17 @@ document.querySelectorAll('[data-method]').forEach(b => b.onclick = () => { sett
 document.addEventListener('click', (e) => {
   if (e.target.closest('[data-resync]')) { resyncNow(); return; }
   if (e.target.closest('[data-cubesolved]')) { markSolved(); return; }
-  if (e.target.closest('[data-btlog]')) { const txt = JSON.stringify({ app: 'slotwise', tab: activeTab, rx: rx.phase, rd: rd.phase, log: btLog }); (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => toast('Bluetooth log copied. Paste it to me.'), () => { window.prompt('Copy this log:', txt); }); return; }
+  if (e.target.closest('[data-btlog]')) { const txt = JSON.stringify({ app: 'slotwise', tab: activeTab, rx: rx.phase, rd: rd.phase, log: btLog }); (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => toast('Bluetooth log copied. Paste it wherever you are reporting the problem.'), () => { window.prompt('Copy this log:', txt); }); return; }
 });
 $('tabRoux').addEventListener('click', (e) => {
-  const sm = e.target.closest('[data-rxslow]'); if (sm) { settings.rxSlow = sm.dataset.rxslow === '1'; store.set('settings', settings); if (rx.phase === 'running') { cancelAnimationFrame(rx.raf); toast('Solve stopped. It wasn\'t saved.'); rxNew(); } renderRx(); renderRxStats(); if (rxIsSlow()) withLSE(null, () => {}); return; }
+  const sm = e.target.closest('[data-rxslow]'); if (sm) { settings.rxSlow = sm.dataset.rxslow === '1'; store.set('settings', settings); if (rx.phase === 'running') { cancelAnimationFrame(rx.raf); toast('Solve stopped. It wasn\'t saved.'); rxNew(); } renderRx(); renderRxStats(); if (rxIsSlow() && !(ROUX.lseReady() && ROUX.sbReady())) withLSE($('rxBox'), () => withSB($('rxBox'), () => { if (activeTab === 'roux') renderRx(); })); return; }
   const sr = e.target.closest('tr[data-rxslowid]'); if (sr) { rx.viewSlow = Number(sr.dataset.rxslowid); renderRx(); renderRxStats(); return; }
   if (e.target.closest('[data-rxstop]')) { cancelAnimationFrame(rx.raf); toast('Solve stopped. It wasn\'t saved.'); rxNew(); return; }
+  const sd = e.target.closest('[data-rxslowdel]');
+  if (sd) {
+    if (!sd.dataset.arm) { sd.dataset.arm = '1'; sd.textContent = 'Click again to delete'; return; }
+    const id = Number(sd.dataset.rxslowdel); rxSlow = rxSlow.filter(x => x.id !== id); rxSlowSave(); rx.viewSlow = rxSlow[0] ? rxSlow[0].id : null; renderRx(); renderRxStats(); return;
+  }
   const db = e.target.closest('[data-rxdel]');
   if (db) {
     if (!db.dataset.arm) { db.dataset.arm = '1'; db.textContent = 'Click again to delete'; return; }
@@ -5914,8 +6224,14 @@ $('tabTricks').addEventListener('click', (e) => {
   const tg = e.target.closest('[data-trig]'); if (tg) { dr.alg = tg.dataset.trig; drillArm(); return; }
   if (e.target.closest('#trUse')) { const v = ($('trCustom').value || '').trim(); const p = E.parseAlg(v); if (!p || !p.moves.length) { toast('That is not an alg Slotwise can read.'); return; } if (p.perToken.some(n => n === 0)) { toast('Rotations can\'t be tracked in a drill; leave them out.'); return; } dr.alg = p.tokens.join(' '); drillArm(); return; }
   if (e.target.closest('#trAgain')) { drillArm(); return; }
+  const tc = e.target.closest('[data-trclear]');
+  if (tc) {
+    if (!tc.dataset.arm) { tc.dataset.arm = '1'; tc.textContent = 'Click again'; return; }
+    delete drillLog[tc.dataset.trclear]; drillSave(); renderTricksLog(); toast('Drill log cleared.'); return;
+  }
   const lg = e.target.closest('[data-trlog]'); if (lg) { dr.alg = lg.dataset.trlog; drillArm(); }
 });
+$('tabTricks').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.id === 'trCustom') { e.preventDefault(); $('trUse').click(); } });
 $('tabCross').addEventListener('click', (e) => {
   const md = e.target.closest('[data-cxmode]'); if (md) { settings.crossMode = md.dataset.cxmode; store.set('settings', settings); cx.attempt = 1; cx.show = false; renderCross(); return; }
   if (e.target.closest('#cxNew')) { cxNewScramble(); return; }
@@ -5925,20 +6241,43 @@ $('tabCross').addEventListener('change', (e) => {
   if (e.target.id === 'cxLvl') { settings.crossLvl = e.target.value; store.set('settings', settings); cxNewScramble(); }
   if (e.target.id === 'cxInsp') { settings.crossInsp = +e.target.value; store.set('settings', settings); renderCross(); }
 });
-$('tabTricks').addEventListener('change', (e) => { if (e.target.id === 'trReps') { dr.reps = +e.target.value; drillArm(); } });
+$('tabTricks').addEventListener('change', (e) => { if (e.target.id === 'trReps') { const typed = ($('trCustom') || {}).value; dr.reps = +e.target.value; drillArm(); if (typed && $('trCustom')) $('trCustom').value = typed; } }); // keep an alg you were still typing
 document.addEventListener('click', (e) => {
   const rb = e.target.closest('[data-run]');
   if (rb) {
     const a = rb.dataset.run, r = runState();
     if (a === 'pause') togglePause();
     else if (a === 'next') nextStep();
-    else if (a === 'go' && r) { setTab(curStep(r).tab); renderRunBar(); }
+    else if (a === 'go' && r) { gotoStep(curStep(r)); renderRunBar(); }
     else if (a === 'stop') { if (!runStopArm) { runStopArm = Date.now(); renderRunBar(); return; } runStopArm = 0; stopRun(); }
     return;
   }
 });
 setInterval(() => { try { tickRunBar(); } catch (e) {} }, 1000);
 $('tabPlan').addEventListener('click', (e) => {
+  const sa = e.target.closest('[data-startact]');
+  if (sa) {
+    const act = sa.dataset.startact, method = curMethod(), startKey = method === 'roux' ? 'planStartRoux' : 'planStart';
+    settings.planTargets = settings.planTargets || {};
+    if (act === 'reset') { delete settings[startKey]; delete settings.planTargets[method]; }
+    else if (act === 'now') {
+      const M = method === 'roux' ? rouxMetrics() : practiceMetrics(), cur2 = {};
+      for (const m of MEAS[method]) if (M[m.k] != null && isFinite(M[m.k])) cur2[m.k] = +(+M[m.k]).toFixed(m.dp == null ? 1 : m.dp);
+      if (!Object.keys(cur2).length) { toast('No numbers to copy yet. Do some timed solves first.'); return; }
+      settings[startKey] = Object.assign({}, settings[startKey] || {}, cur2);
+    } else {
+      const read = (sel, attr) => { const out = {};
+        for (const inp of document.querySelectorAll('#startBox [' + sel + ']')) { const v = parseFloat(String(inp.value).replace(',', '.')); if (inp.value.trim() !== '' && (!isFinite(v) || v < 0)) { toast('"' + inp.value + '" is not a number.'); inp.focus(); return null; } if (isFinite(v)) out[inp.dataset[attr]] = v; }
+        return out; };
+      const st = read('data-start', 'start'); if (!st) return;
+      const tg = read('data-target', 'target'); if (!tg) return;
+      settings[startKey] = st; settings.planTargets[method] = tg;
+    }
+    store.set('settings', settings); renderPlan();
+    const box = $('startBox'); if (box) box.open = true;
+    toast(act === 'reset' ? 'Start values and targets reset; targets are automatic again.' : act === 'now' ? 'Start column set to your numbers now.' : 'Saved.');
+    return;
+  }
   const pm = e.target.closest('[data-pmins]'); if (pm) { planState().mins = +pm.dataset.pmins; store.set('settings', settings); renderPlan(); return; }
   if (e.target.closest('#pReroll')) { const P = planState(); P.seed = (P.seed || 1) + 1; store.set('settings', settings); renderPlan(); return; }
   if (e.target.closest('#pStart')) { startPractice(); return; }
@@ -5954,11 +6293,12 @@ function renderSessBars(){
     const all = kind === 'timer' ? tAll : histAll;
     el.innerHTML = '<select aria-label="Session" data-sact="pick">' + list.map(s => '<option value="' + esc(s.id) + '"' + (s.id === cur ? ' selected' : '') + '>' + esc(s.name) + ' (' + all.filter(x => (x.session || 'main') === s.id).length + ')</option>').join('') + '</select>' +
       '<button class="mini" data-sact="new">New session</button><button class="mini" data-sact="rename">Rename</button>' +
-      (cur !== 'main' ? '<button class="mini" data-sact="del">' + (el.dataset.arm ? 'Click again: delete it and its solves' : 'Delete') + '</button>' : '') +
+      (cur !== 'main' ? '<button class="mini" data-sact="del">' + (el.dataset.arm === cur ? 'Click again: delete it and its solves' : 'Delete') + '</button>' : '') +
       '<label title="Pairs from this session feed the F2L cards stats"><input type="checkbox" data-sact="caseStats"' + (so.caseStats === false ? '' : ' checked') + '> counts in F2L cards</label>';
   });
 }
 function afterSessChange(kind){
+  if (kind === 'f2l') { try { disarmClear(); } catch (e) {} }
   store.set('settings', settings);
   if (kind === 'timer') { refreshTimerView(); tm.viewId = tSolves[0] ? tSolves[0].id : null; renderTimerStats(); renderSolveDetail(); }
   else {
@@ -5982,7 +6322,8 @@ document.addEventListener('click', (e) => {
   else if (act === 'saveName') { const v = ($('sessName-' + kind).value || '').trim(); if (v) sessObj(kind).name = v.slice(0, 40); delete el.dataset.renaming; store.set('settings', settings); renderSessBars(); }
   else if (act === 'cancelName') { delete el.dataset.renaming; renderSessBars(); }
   else if (act === 'del') {
-    if (!el.dataset.arm) { el.dataset.arm = '1'; renderSessBars(); setTimeout(() => { delete el.dataset.arm; renderSessBars(); }, 4000); return; }
+    // the confirmation belongs to one session: switching sessions in between starts over
+    if (el.dataset.arm !== curSess(kind)) { const armed = el.dataset.arm = curSess(kind); renderSessBars(); clearTimeout(el._armT); el._armT = setTimeout(() => { if (el.dataset.arm === armed) { delete el.dataset.arm; renderSessBars(); } }, 4000); return; }
     delete el.dataset.arm;
     const id = curSess(kind);
     if (kind === 'timer') { tAll = tAll.filter(x => (x.session || 'main') !== id); saveSolves(); }
@@ -6058,10 +6399,21 @@ $('llBox').addEventListener('click', (e) => {
 });
 $('deckSort').onchange = () => { settings.f2lSort = $('deckSort').value; store.set('settings', settings); renderDeck(); };
 $('cardAlgSave').onclick = () => {
-  const r = importCardAlgs($('cardAlgText').value);
-  $('cardAlgMsg').textContent = 'Updated ' + r.n + ' card' + (r.n === 1 ? '' : 's') + '.' + (r.unmatched.length ? ' Couldn\'t match ' + r.unmatched.length + ': ' + r.unmatched.slice(0, 3).join(' · ') + (r.unmatched.length > 3 ? ' …' : '') : '');
+  const b = $('cardAlgSave'), text = $('cardAlgText').value;
+  const miss = (r) => r.unmatched.length ? ' Couldn\'t match ' + r.unmatched.length + ': ' + r.unmatched.slice(0, 3).join(' · ') + (r.unmatched.length > 3 ? ' …' : '') : '';
+  if (b.dataset.armed !== text) { // first press: say what would change
+    const r = importCardAlgs(text, true);
+    if (!r.n) { $('cardAlgMsg').textContent = 'No alg in this text matches a card.' + miss(r); return; }
+    b.dataset.armed = text; b.textContent = 'Apply to ' + r.n + ' card' + (r.n === 1 ? '' : 's');
+    $('cardAlgMsg').textContent = 'This sets the alg for ' + r.n + ' card' + (r.n === 1 ? '' : 's') + (r.replaced ? ', replacing ' + r.replaced + ' alg' + (r.replaced === 1 ? '' : 's') + ' you chose yourself' : '') + '.' + miss(r) + ' Press again to apply.';
+    return;
+  }
+  const r = importCardAlgs(text);
+  delete b.dataset.armed; b.textContent = 'Use these algs';
+  $('cardAlgMsg').textContent = 'Updated ' + r.n + ' card' + (r.n === 1 ? '' : 's') + '.' + miss(r);
   renderDeck(); renderLL();
 };
+$('cardAlgText').addEventListener('input', () => { const b = $('cardAlgSave'); if (b.dataset.armed) { delete b.dataset.armed; b.textContent = 'Use these algs'; $('cardAlgMsg').textContent = ''; } });
 $('cardAlgReset').onclick = () => { for (const c of LLCARDS) if (llStats[c.id]) delete llStats[c.id].alg; saveLL(); $('cardAlgMsg').textContent = 'All cards use the built-in algs again.'; renderDeck(); renderLL(); };
 $('llBox').addEventListener('click', (e) => {
   if (!ll.card) return;
@@ -6069,7 +6421,9 @@ $('llBox').addEventListener('click', (e) => {
   if (e.target.id === 'algEditSave') { const err = saveCardAlg(ll.card, $('algEditInput').value); if (err) $('algEditMsg').textContent = err; else { toast('Saved your alg for ' + ll.card.name + '.'); renderLL(); renderDeck(); } }
   const ua = e.target.closest('[data-usealg]');
   if (ua) { const err = saveCardAlg(ll.card, ua.dataset.usealg); if (err) $('algEditMsg').textContent = err; else { toast('Saved: ' + ll.card.name + ' is now ' + ua.dataset.usealg + '.'); if (ll.phase === 'done') { ll.follow = null; ll.paths = []; } renderLL(); renderDeck(); } }
-  if (e.target.id === 'algEditReset') { delete stat(ll.card.id).alg; saveLL(); renderLL(); renderDeck(); }
+  if (e.target.id === 'algEditReset') { const s1 = stat(ll.card.id); delete s1.alg; delete s1.mine; saveLL(); renderLL(); renderDeck(); }
+  const fa = e.target.closest('[data-forgetalg]');
+  if (fa && ll.card) { const s1 = stat(ll.card.id); s1.mine = (s1.mine || []).filter(x => x !== fa.dataset.forgetalg); if (!s1.mine.length) delete s1.mine; saveLL(); renderLL(); return; }
 });
 $('poolOrder').onchange = () => { poolSettings().order = $('poolOrder').value; store.set('settings', settings); renderPool(); };
 $('poolGroups').addEventListener('change', (e) => {
@@ -6096,12 +6450,11 @@ $('deck').addEventListener('click', (e) => {
   ll.drill = null;
   if (ll.phase === 'running' && !ll.revealed && ll.card && ll.card.id !== c.id) llFinish(false);
   const learning = !stat(c.id).known;
-  if (learning && c.set !== 'F2L') { stat(c.id).known = true; saveLL(); } // F2L cases get ticked when you pass the test
   presentCard(c, { learning });
 });
 $('deck').addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-card]')) { e.preventDefault(); e.target.click(); } });
 document.addEventListener('keydown', (e) => {
-  if (!isLLTab(activeTab) || e.key !== ' ' || e.target.closest('input,textarea,select,button,[data-card]')) return;
+  if (!isLLTab(activeTab) || e.key !== ' ' || e.repeat || !e.target.closest || e.target.closest('input,textarea,select,button,summary,a,[tabindex],[data-card]')) return;
   e.preventDefault(); nextCard();
 });
 build3D();
@@ -6111,7 +6464,16 @@ $('tDetail').addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.ke
 // ----- backup -----
 function dataKeys(){ const ks = []; try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('slotwise.')) ks.push(k); } } catch (e) {} return ks; }
 function dataSummary(){ return tAll.length + ' timed solves, ' + rxSolves.length + ' Roux solves, ' + histAll.length + ' F2L solves, ' + Object.values(llStats).filter(x => x.known).length + ' known OLL/PLL cards'; }
-function updateDataStatus(){ const el = $('dataStatus'); if (el && !el.querySelector('button')) el.textContent = 'Saved here now: ' + dataSummary() + '.'; }
+// Which shape each saved group must have; anything else in a backup is refused.
+const DATA_SHAPE = { solves: 'list', history: 'list', rouxSolves: 'list', rouxSlow: 'list', cross: 'list', practice: 'list', rouxDrills: 'list', llcards: 'map', settings: 'map', drills: 'map', macs: 'map' };
+let dataHold = 0;
+function dataMsg(text, ms){ const el = $('dataStatus'); if (!el) return; el.textContent = text; dataHold = Date.now() + (ms || 15000); }
+function updateDataStatus(){
+  const el = $('dataStatus'); if (!el || el.querySelector('button')) return;
+  if (store.failed) { el.textContent = 'Storage is full: your latest changes are NOT saved. Export a backup, then clear old sessions.'; $('dataPanel').open = true; return; }
+  if (Date.now() < dataHold) return;
+  el.textContent = 'Saved here now: ' + dataSummary() + '.';
+}
 updateDataStatus();
 setInterval(updateDataStatus, 5000);
 $('btnExport').onclick = () => {
@@ -6121,7 +6483,7 @@ $('btnExport').onclick = () => {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = 'slotwise-backup-' + new Date().toISOString().slice(0, 10) + '.json';
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-  $('dataStatus').textContent = 'Exported ' + dataSummary() + '.';
+  dataMsg('Exported ' + dataSummary() + '.');
 };
 $('btnImport').onclick = () => $('importFile').click();
 $('importFile').onchange = async () => {
@@ -6129,11 +6491,39 @@ $('importFile').onchange = async () => {
   try {
     const obj = JSON.parse(await f.text());
     if (!obj || obj.app !== 'slotwise' || !obj.data) throw new Error('not a Slotwise backup');
-    const keys = Object.keys(obj.data).filter(k => k.startsWith('slotwise.'));
-    const n = (obj.data['slotwise.solves'] || []).length;
-    $('dataStatus').innerHTML = 'This backup has ' + n + ' timed solves (from ' + esc(String(obj.exported).slice(0, 10)) + '). Importing replaces what is saved here. <button id="btnImportGo" class="mini">Replace and reload</button>';
-    $('btnImportGo').onclick = () => { for (const k of keys) store.set(k.slice(9), obj.data[k]); location.reload(); };
-  } catch (e) { $('dataStatus').textContent = 'Could not read that file: ' + (e.message || e) + '.'; }
+    if (typeof obj.data !== 'object' || Array.isArray(obj.data)) throw new Error('not a Slotwise backup');
+    const keys = Object.keys(obj.data).filter(k => k.startsWith('slotwise.') && obj.data[k] != null);
+    for (const k of keys) {
+      const want = DATA_SHAPE[k.slice(9)], v = obj.data[k];
+      if (want === 'list' && !Array.isArray(v)) throw new Error('"' + k.slice(9) + '" is not a list, so the file looks damaged');
+      if (want === 'map' && (typeof v !== 'object' || Array.isArray(v))) throw new Error('"' + k.slice(9) + '" has the wrong shape, so the file looks damaged');
+    }
+    if (!keys.length) throw new Error('the backup is empty');
+    const cnt = (k) => (Array.isArray(obj.data['slotwise.' + k]) ? obj.data['slotwise.' + k].length : 0);
+    const synced = !!(window.__swSync && window.__swSync.user);
+    const GROUP_NAME = { solves: 'timer solves', history: 'F2L solves', rouxSolves: 'Roux solves', rouxSlow: 'Roux slow solves', cross: 'cross drills', practice: 'practice sessions', rouxDrills: 'Roux drills', llcards: 'cards', settings: 'settings', drills: 'finger-trick drills', macs: 'cube addresses' };
+    const skipped = dataKeys().filter(k => !keys.includes(k)).map(k => GROUP_NAME[k.slice(9)] || k.slice(9));
+    $('dataStatus').innerHTML = 'This backup has ' + cnt('solves') + ' timed solves, ' + cnt('rouxSolves') + ' Roux solves and ' + cnt('history') + ' F2L solves (from ' + esc(String(obj.exported).slice(0, 10)) + '). ' +
+      'Importing replaces the ' + keys.length + ' group' + (keys.length === 1 ? '' : 's') + ' of data in this backup' + (skipped.length ? ' and leaves the rest here untouched (' + skipped.join(', ') + ')' : '') + '. ' +
+      (synced ? 'The next sync then merges it with your account, so nothing in the account is deleted. ' : '') +
+      '<button id="btnImportGo" class="mini primary">Replace and reload</button> <button id="btnImportNo" class="mini">Cancel</button>';
+    $('btnImportNo').onclick = () => { $('dataStatus').textContent = ''; updateDataStatus(); };
+    $('btnImportGo').onclick = () => {
+      // all or nothing: if the browser runs out of space part-way, put back what was there
+      const old = {}; for (const k of dataKeys()) old[k] = localStorage.getItem(k);
+      try {
+        // only the groups the backup holds are replaced; a group it does not mention (one added to
+        // Slotwise after the backup was made, say) is left as it is
+        for (const k of keys) localStorage.setItem(k, JSON.stringify(obj.data[k]));
+      } catch (er) {
+        try { for (const k of dataKeys()) if (!(k in old)) localStorage.removeItem(k); for (const k in old) localStorage.setItem(k, old[k]); } catch (e2) {}
+        $('dataStatus').textContent = ''; dataMsg('Could not import: the backup does not fit in this browser\'s storage. Nothing was changed.', 30000); return;
+      }
+      // Sync must not read "missing from the backup" as "deleted": start it over as a merge.
+      try { if (window.__swSync && window.__swSync.restart) window.__swSync.restart(); } catch (er) {}
+      window.__swFrozen = true; location.reload();
+    };
+  } catch (e) { $('dataStatus').textContent = ''; dataMsg('Could not read that file: ' + (e.message || e) + '.', 30000); }
   $('importFile').value = '';
 };
 $('tDetail').addEventListener('click', (e) => {
@@ -6154,6 +6544,15 @@ $('setLLHint').onchange = () => { settings.llHint = $('setLLHint').value; store.
 $('setInspect').onchange = () => { settings.inspection = $('setInspect').value === '1'; store.set('settings', settings); if (activeTab === 'timer' && tm.phase === 'inspect') renderTimer(); };
 document.addEventListener('keydown', (e) => tKey(e, true));
 document.addEventListener('keyup', (e) => tKey(e, false));
+// touch and mouse: press and hold the time, like the space bar; while running, a tap anywhere in the box stops
+$('tBox').addEventListener('pointerdown', (e) => {
+  if (activeTab !== 'timer' || conn || !tm.phase.startsWith('manual') || e.button > 0 || e.target.closest('button')) return;
+  if (tm.phase !== 'manual-running' && !e.target.closest('#tTime')) return;
+  e.preventDefault(); tPress(true);
+});
+document.addEventListener('pointerup', () => { if (tm.phase === 'manual-hold' || tm.phase === 'manual-armed') tPress(false); });
+document.addEventListener('pointercancel', () => { if (tm.phase === 'manual-hold' || tm.phase === 'manual-armed') { clearTimeout(tm.holdT); tm.phase = 'manual-idle'; renderTimer(); } });
+$('tBox').addEventListener('contextmenu', (e) => { if (e.target.closest('#tTime')) e.preventDefault(); });
 
 $('btnNew').onclick = () => { if (phase === 'solving') return; newScramble(); };
 $('btnSolved').onclick = () => {
@@ -6165,9 +6564,14 @@ $('btnSolved').onclick = () => {
 $('btnVirt').onclick = () => { queueVirtual($('virtInput').value, 60); $('virtInput').value = ''; };
 $('virtInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('btnVirt').click(); } });
 $('btnDemo').onclick = demoSolve;
+function disarmClear(){ const b = $('btnClear'); clearTimeout(b._armT); delete b.dataset.arm; b.textContent = 'Clear history'; $('clearHint').textContent = CLEAR_HINT; }
+const CLEAR_HINT = 'Slotwise keeps your latest 2000 F2L solves across all sessions.';
+$('clearHint').textContent = CLEAR_HINT;
 $('btnClear').onclick = () => {
-  if ($('btnClear').dataset.arm) { histAll = histAll.filter(h => !inSess('f2l', h)); store.set('history', histAll); refreshHistView(); viewingId = null; renderHistory(); $('clearHint').textContent = ''; delete $('btnClear').dataset.arm; $('btnClear').textContent = 'Clear history'; return; }
-  $('btnClear').dataset.arm = '1'; $('btnClear').textContent = 'Click again to clear'; $('clearHint').textContent = 'This deletes every solve in this session.';
+  const b = $('btnClear');
+  if (b.dataset.arm && b.dataset.arm === curSess('f2l')) { histAll = histAll.filter(h => !inSess('f2l', h)); store.set('history', histAll); refreshHistView(); viewingId = null; renderHistory(); disarmClear(); toast('History of this session cleared.'); return; }
+  b.dataset.arm = curSess('f2l'); b.textContent = 'Click again to clear'; $('clearHint').textContent = 'This deletes every solve in this session.';
+  clearTimeout(b._armT); b._armT = setTimeout(disarmClear, 5000);
 };
 $('phaseBox').addEventListener('click', (e) => {
   if (e.target.closest('[data-adv]')) { setAdv(!showAdv); return; }
@@ -6210,9 +6614,60 @@ $('histBody').addEventListener('click', (e) => {
 });
 $('setCross').value = settings.cross; $('setThr').value = String(settings.threshold); $('setD').value = settings.allowD ? '1' : '0';
 $('setCross').onchange = () => { settings.cross = $('setCross').value; store.set('settings', settings); renderNet(); renderSlotChips(); renderPhase(); if (conn) { needInitialSync = true; conn.sendCubeCommand({ type: 'REQUEST_FACELETS' }).catch(() => {}); } };
-$('setThr').onchange = () => { settings.threshold = +$('setThr').value; store.set('settings', settings); history.forEach(h => { if (h.sum && tablesReady) h.sum = summarize(analyze(h)); }); store.set('history', histAll); renderHistory(); };
+// The threshold changes every solve's "easier pair missed" count, in every session. Redo them a
+// few at a time (this session first) so the page stays usable.
+let thrJob = 0;
+function recomputeSums(){
+  const job = ++thrJob, list = history.concat(histAll.filter(h => !history.includes(h))).filter(h => h.sum && h.start && h.moves);
+  let i = 0;
+  const step = () => {
+    if (job !== thrJob) return;
+    if (!tablesReady) { setTimeout(step, 300); return; }
+    const t0 = performance.now();
+    while (i < list.length && performance.now() - t0 < 30) { try { list[i].sum = summarize(analyze(list[i])); } catch (e) {} i++; }
+    if (i === history.length || i >= list.length) renderHistory();
+    if (i < list.length) { setTimeout(step, 0); return; }
+    store.set('history', histAll); renderHistory();
+    if (list.length > 40) toast('Updated ' + list.length + ' solves for the new setting.');
+  };
+  step();
+}
+$('setThr').onchange = () => { settings.threshold = +$('setThr').value; store.set('settings', settings); recomputeSums(); };
 function renderMacHint(){ const n = Object.keys(store.get('macs', {})).length; $('macHint').textContent = n ? n + ' cube' + (n > 1 ? 's' : '') + ' remembered' : 'None saved'; }
 renderMacHint();
+// --- small interface helpers ---
+// rows that open something work from the keyboard too
+document.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('tr[tabindex]')) { e.preventDefault(); e.target.click(); } });
+// on touch screens there is no hover: a tap on something that only has a tooltip shows it
+document.addEventListener('click', (e) => {
+  if (!window.matchMedia || !matchMedia('(hover: none)').matches || !e.target.closest) return;
+  const el = e.target.closest('[title],[data-tip]'); if (!el || el.closest('button,a,input,select,textarea,label,summary,tr[tabindex],[data-card],[data-cmcard],[data-redo]')) return;
+  const tip = el.getAttribute('data-tip') || el.getAttribute('title'); if (tip) toast(tip);
+});
+// "Stop without saving" throws a solve away: ask for a second press
+const stopArm = { key: '', until: 0 };
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('[data-stop],#tAbort,[data-rxstop]'); if (!b) return;
+  const key = b.id || (b.dataset.stop ? 'f2l' : 'roux');
+  if (stopArm.key === key && Date.now() < stopArm.until) { stopArm.key = ''; return; }
+  e.stopImmediatePropagation(); e.preventDefault();
+  stopArm.key = key; stopArm.until = Date.now() + 4000; b.textContent = 'Press again to discard this solve';
+  setTimeout(() => { if (b.isConnected && stopArm.key === key && Date.now() >= stopArm.until) b.textContent = 'Stop without saving'; }, 4100);
+}, true);
+// colour theme: follows the device unless you pick one; kept on this device only
+(function(){
+  const b = $('btnTheme'); if (!b) return;
+  const lab = { auto: 'follows your device', light: 'light', dark: 'dark' }, ic = { auto: '◐', light: '☀', dark: '☾' };
+  const get = () => { try { const t = localStorage.getItem('slotwise-theme'); return t === 'light' || t === 'dark' ? t : 'auto'; } catch (e) { return 'auto'; } };
+  const show = () => { const t = get(); b.textContent = ic[t]; b.title = 'Colour theme: ' + lab[t] + '. Press to change.'; b.setAttribute('aria-label', b.title); };
+  b.onclick = () => {
+    const n = { auto: 'light', light: 'dark', dark: 'auto' }[get()];
+    try { if (n === 'auto') localStorage.removeItem('slotwise-theme'); else localStorage.setItem('slotwise-theme', n); } catch (e) {}
+    if (n === 'auto') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', n);
+    show(); toast('Colour theme: ' + lab[n] + '.');
+  };
+  show();
+})();
 $('btnForgetMac').onclick = () => { store.set('macs', {}); renderMacHint(); toast('Saved MAC addresses cleared. Next connect will look it up again.'); };
 $('setBackSlot').value = settings.backSlot === 'norot' ? 'norot' : 'rot';
 $('setBackSlot').onchange = () => { settings.backSlot = $('setBackSlot').value; store.set('settings', settings); algLib.noRotBack = settings.backSlot === 'norot'; setAdvAlgs(showAdvAlgs); };
@@ -6265,7 +6720,7 @@ async function boot(){
   Cube.initSolver(); solverReady = true; try { backfillLL(); } catch (e) {}
   $('bootBar').style.width = '15%';
   newScramble();
-  if (activeTab === 'roux' || activeTab === 'rxd' || activeTab === 'timer') setTab(activeTab);
+  if (activeTab === 'roux' || activeTab === 'rxd' || activeTab === 'timer' || activeTab === 'cross') setTab(activeTab);
   if (conn && needInitialSync) conn.sendCubeCommand({ type: 'REQUEST_FACELETS' }).catch(() => {});
   $('bootText').textContent = 'Building pair solver'; await tick();
   const g = E.buildTablesSteps(); let i = 0;
@@ -6279,7 +6734,7 @@ renderSessBars();
 applyMethod();
 boot();
 try { renderRunBar(); } catch (e) {}
-try { const tb = sessionStorage.getItem('slotwise.tab'); if (['ll', 'timer', 'f2lc', 'cmllc', 'plan', 'tricks', 'cross', 'roux', 'rxd'].includes(tb)) setTab(tb); else setTab(curMethod() === 'roux' ? 'roux' : 'timer'); } catch (e) { setTab(curMethod() === 'roux' ? 'roux' : 'timer'); }
+try { const tb = sessionStorage.getItem('slotwise.tab'); if (['ll', 'timer', 'f2l', 'f2lc', 'cmllc', 'plan', 'tricks', 'cross', 'roux', 'rxd'].includes(tb)) setTab(tb); else setTab(curMethod() === 'roux' ? 'roux' : 'timer'); } catch (e) { setTab(curMethod() === 'roux' ? 'roux' : 'timer'); }
 window.__slotwise = { get rx(){ return rx; }, get rd(){ return rd; }, get rxSolves(){ return rxSolves; }, get rdLog(){ return rdLog; }, setTab, ROUX, get phase(){ return phase; }, get rem(){ return rem; }, get cur(){ return cur; }, get target(){ return target; }, get practice(){ return practice; }, get ll(){ return ll; }, get tm(){ return tm; }, caseFreq, poolCards, LLCARDS, pathBetween, renderTimer, get tSolves(){ return tSolves; }, get conn(){ return conn; }, set conn(v){ conn = v; }, retryScramble, handleTurn, queueVirtual, demoSolve, onCubeEvent, faceletsToUser, facelets };
 })();
 </script>
@@ -6290,10 +6745,14 @@ window.__slotwise = { get rx(){ return rx; }, get rd(){ return rd; }, get rxSolv
 (function () {
   'use strict';
   const P = 'slotwise.', CFGK = 'slotwise-sync.cfg', METAK = 'slotwise-sync.meta';
-  const LISTS = { solves: 'id', history: 'id', rouxSolves: 'id', cross: 'd', practice: 'd', rouxDrills: 'd' };
-  const NEWEST_FIRST = { solves: 1, history: 1, rouxSolves: 1 };
+  const LISTS = { solves: 'id', history: 'id', rouxSolves: 'id', rouxSlow: 'id', cross: 'd', practice: 'd', rouxDrills: 'd' };
+  const NEWEST_FIRST = { solves: 1, history: 1, rouxSolves: 1, rouxSlow: 1 };
   const KV = ['llcards', 'settings', 'drills', 'macs'];
-  const LIB = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+  // Pinned to one exact file and checked against its hash, so a changed or tampered copy is refused.
+  // To update: pick a version, download the file, and replace the hash with the output of
+  //   openssl dgst -sha384 -binary supabase.js | openssl base64 -A
+  const LIB = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js';
+  const LIB_HASH = 'sha384-uteMfOloLDGt042uDz+xHGF3ym63/WQ6rFq7murQRG8Ih7QrXGEGNtWd8688sb4O';
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } };
@@ -6312,14 +6771,15 @@ window.__slotwise = { get rx(){ return rx; }, get rd(){ return rd; }, get rxSolv
   const cfg = { url: (base.url || saved.url || '').trim(), key: (base.key || saved.key || '').trim() };
   const fresh = () => ({ user: null, cursor: { items: null, kv: null }, srv: {}, kvh: {}, last: 0 });
   let meta = Object.assign(fresh(), lsGet(METAK, {}));
-  const saveMeta = () => lsSet(METAK, meta);
+  let halted = false; // set when a backup was just imported: nothing more is written until the page restarts
+  const saveMeta = () => halted ? false : lsSet(METAK, meta);
   let client = null, user = null, busy = false, dirty = false, pending = null, status = '', timer = 0, pushes = 0;
   const pageStart = Date.now();
 
   function loadLib() {
     return new Promise((res, rej) => {
       if (window.supabase && window.supabase.createClient) return res();
-      const s = document.createElement('script'); s.src = LIB; s.onload = () => res(); s.onerror = () => rej(new Error('could not load the sync library (offline?)'));
+      const s = document.createElement('script'); s.src = LIB; s.integrity = LIB_HASH; s.crossOrigin = 'anonymous'; s.onload = () => res(); s.onerror = () => rej(new Error('could not load the sync library (offline?)'));
       document.head.appendChild(s);
     });
   }
@@ -6361,7 +6821,7 @@ window.__slotwise = { get rx(){ return rx; }, get rd(){ return rd; }, get rxSolv
   const maxTime = (rows, cur) => rows.reduce((m, r) => (!m || new Date(r.updated_at) > new Date(m)) ? r.updated_at : m, cur);
   function localLists() { const L = {}; for (const k in LISTS) { const a = lsGet(P + k, []); L[k] = Array.isArray(a) ? a : []; } return L; }
   async function pull(L) {
-    const inc = { lists: {}, kv: {}, kvRemote: {}, cursor: { items: meta.cursor.items, kv: meta.cursor.kv }, n: 0 };
+    const inc = { lists: {}, kv: {}, kvRemote: {}, kvLocal: {}, kvValue: {}, cursor: { items: meta.cursor.items, kv: meta.cursor.kv }, n: 0 };
     const rows = await fetchAll('slotwise_items', meta.cursor.items, ['kind', 'id']);
     inc.cursor.items = maxTime(rows, meta.cursor.items);
     const maps = {}; for (const k in LISTS) { maps[k] = new Map(L[k].filter(x => x && x[LISTS[k]] != null).map(x => [Number(x[LISTS[k]]), x])); inc.lists[k] = { up: [], del: [] }; meta.srv[k] = meta.srv[k] || {}; }
@@ -6380,7 +6840,7 @@ window.__slotwise = { get rx(){ return rx; }, get rd(){ return rd; }, get rxSolv
       const loc = lsGet(P + r.key, null), rh = hashOf(r.value), lh = hashOf(loc);
       if (rh === lh) { meta.kvh[r.key] = rh; continue; }
       const merged = (loc == null || lh === meta.kvh[r.key]) ? r.value : mergeKV(r.key, loc, r.value);
-      inc.kvRemote[r.key] = rh;
+      inc.kvRemote[r.key] = rh; inc.kvLocal[r.key] = lh; inc.kvValue[r.key] = r.value;
       if (hashOf(merged) !== lh) { inc.kv[r.key] = merged; inc.n++; } else meta.kvh[r.key] = rh; // merged equals local: just send it
     }
     return inc;
@@ -6437,7 +6897,13 @@ window.__slotwise = { get rx(){ return rx; }, get rd(){ return rd; }, get rxSolv
       const list = [...m.values()].sort((a, b) => NEWEST_FIRST[k] ? b[f] - a[f] : a[f] - b[f]);
       if (!lsSet(P + k, list)) throw new Error('this browser is out of storage space');
     }
-    for (const key in inc.kv) { lsSet(P + key, inc.kv[key]); meta.kvh[key] = inc.kvRemote[key]; }
+    for (const key in inc.kv) {
+      // if this group changed here after the new data was fetched, merge again so that is not lost
+      const cur = lsGet(P + key, null);
+      const val = (cur != null && hashOf(cur) !== inc.kvLocal[key]) ? mergeKV(key, cur, inc.kvValue[key]) : inc.kv[key];
+      if (!lsSet(P + key, val)) throw new Error('this browser is out of storage space');
+      meta.kvh[key] = inc.kvRemote[key];
+    }
     meta.cursor = inc.cursor; meta.last = Date.now(); saveMeta();
   }
   function appBusy() { try { const S = window.__slotwise; return !!(S && S.conn); } catch (e) { return false; } }
@@ -6456,7 +6922,9 @@ window.__slotwise = { get rx(){ return rx; }, get rd(){ return rd; }, get rxSolv
     try {
       const L = localLists();
       const inc = await pull(L);
+      if (halted) { busy = false; return; }
       await push(L, inc);
+      if (halted) { busy = false; return; }
       if (inc.n) {
         pending = inc;
         let recent = 0; try { recent = Number(sessionStorage.getItem('slotwise-sync.applied') || 0); } catch (e) {}
@@ -6466,7 +6934,7 @@ window.__slotwise = { get rx(){ return rx; }, get rd(){ return rd; }, get rxSolv
         saveMeta(); setStatus('');
       } else { pending = null; meta.cursor = inc.cursor; meta.last = Date.now(); saveMeta(); setStatus(''); }
     } catch (e) { setStatus('Sync failed: ' + (e.message || e) + '. It will try again.'); }
-    busy = false;
+    busy = false; summary();
     if (dirty) schedule(3000);
   }
   function schedule(ms) { clearTimeout(timer); timer = setTimeout(sync, ms == null ? 8000 : ms); }
@@ -6477,7 +6945,20 @@ window.__slotwise = { get rx(){ return rx; }, get rd(){ return rd; }, get rxSolv
   setInterval(() => { if (user && document.visibilityState === 'visible' && Date.now() - meta.last > 300000) sync(); }, 60000);
 
   // ----- the panel -----
+  // the one-line summary on the closed "Your data and sync" panel; it opens by itself when something needs you
+  let lastAuto = '';
+  function summary() {
+    const el = $('dataSum'), panel = $('dataPanel'); if (!el) return;
+    const bad = /failed|not available|Could not/.test(status);
+    el.textContent = !cfg.url || !cfg.key ? 'saved on this device only' : !user ? 'saved on this device · not signed in' : pending ? 'new data from another device is waiting' : bad ? 'sync problem' : busy ? 'syncing…' :
+      meta.last ? 'synced ' + new Date(meta.last).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'not synced yet';
+    el.style.color = pending || bad ? 'var(--warn)' : '';
+    const why = pending ? 'pending' : bad ? 'bad' : '';
+    if (why && why !== lastAuto && panel) panel.open = true;
+    lastAuto = why;
+  }
   function render() {
+    summary();
     const box = $('syncBox'); if (!box) return;
     const keep = {}; box.querySelectorAll('input').forEach(i => { keep[i.id] = i.value; });
     let h = '<p class="eyebrow" style="margin:14px 0 6px">Sync between devices</p>';
@@ -6515,7 +6996,10 @@ window.__slotwise = { get rx(){ return rx; }, get rd(){ return rd; }, get rxSolv
     if (error) { setStatus('Could not sign in: ' + error.message); return; }
     status = ''; if (data && data.user) setUser(data.user);
   });
-  window.__swSync = { sync, get pending() { return pending; }, get user() { return user; }, get pushes() { return pushes; }, get meta() { return meta; }, loadPending, get busy() { return busy; } };
+  // After a backup import: forget what this device thinks the account holds, so the next sync
+  // merges the two instead of deleting from the account whatever the backup does not have.
+  function restart() { meta = fresh(); meta.user = user ? user.id : null; lsSet(METAK, meta); pending = null; halted = true; clearTimeout(timer); }
+  window.__swSync = { sync, restart, get pending() { return pending; }, get user() { return user; }, get pushes() { return pushes; }, get meta() { return meta; }, loadPending, get busy() { return busy; } };
   init();
 
   // installable app: offline cache, and keep the screen on while a cube is connected

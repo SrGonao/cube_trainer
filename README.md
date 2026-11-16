@@ -18,6 +18,9 @@ CFOP and Roux trainer for GAN smart cubes. One web app for laptop and Android, w
 3. Open **Authentication → Users → Add user → Create new user**. Enter your email and a password and tick **Auto Confirm User**.
 4. Open the project's API settings (Project Settings → API Keys / Data API). Copy the **Project URL** and the **publishable** key (older projects call it the **anon** key). Never use the secret / service_role key.
 5. Put both into `config.js`.
+6. In the project's **Authentication** settings, turn **Allow new users to sign up** off. The
+   project URL and key are public, so with sign-ups on anyone could create accounts in your project.
+   You already made your own user in step 3.
 
 ### 2. GitHub Pages (hosting)
 
@@ -46,6 +49,9 @@ The cube's MAC address syncs from the laptop, so the phone should not need to as
 - Solves and log entries sync one by one, so two devices never overwrite each other's solves.
   Deleting a solve deletes it everywhere.
 - Cards merge per card (the more recently practised side wins). For settings, the device you are on wins.
+- Importing a backup replaces the groups of data the backup contains and leaves the rest alone.
+  While signed in, the result is then merged with your account at the next sync. Nothing in the account is deleted by an import; solves you deleted
+  earlier that are still in the backup come back.
 - When another device has new data: right after opening, the app loads it and restarts by itself.
   Later, or with a cube connected, it shows **Load it** under Your data instead, because
   restarting drops the cube connection.
@@ -53,3 +59,4 @@ The cube's MAC address syncs from the laptop, so the phone should not need to as
 ## Updating the app
 
 Upload the new `index.html` to the repository. Devices pick it up the next time they open online.
+If `supabase-setup.sql` changed, run it again in the SQL editor; it is safe to run more than once.
